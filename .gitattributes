@@ -1,0 +1,22 @@
+# 统一 LF：Windows 提交时才不会把 CRLF 带进 Makefile / debian/rules。
+# debian/rules 带 CRLF 会在 Linux 上直接报 "bad interpreter"，这是最典型的坑。
+* text=auto eol=lf
+
+*.c        text eol=lf
+*.h        text eol=lf
+*.py       text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.ppd.in   text eol=lf
+Makefile       text eol=lf
+debian/rules   text eol=lf
+Dockerfile     text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+# 二进制，别做任何转换
+*.pbm    binary
+*.bin    binary
+*.pcap   binary
+*.deb    binary
+*.exe    binary

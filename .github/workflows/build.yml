@@ -1,0 +1,77 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 用 QEMU 模拟；amd64 直接原生跑
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build, syntax check, unit tests
+        run: |
+          docker run --rm --platform linux/${{ matrix.arch }} \
+            -v "$PWD":/src -w /src debian:bookworm \
+            bash -euc '
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential pkg-config libcups2-dev file
+              make clean
+              make
+              make syntax
+              make test
+              echo "--- artifact ---"
+              file rastertotoshiba
+              ldd rastertotoshiba
+            '
+
+      - name: Build .deb
+        run: |
+          mkdir -p out
+          docker run --rm --platform linux/${{ matrix.arch }} \
+            -v "$PWD":/src -w /src debian:bookworm \
+            bash -euc '
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential pkg-config libcups2-dev debhelper dpkg-dev
+              # Windows 上提交的仓库可能丢掉 debian/rules 的可执行位，这里兜底
+              chmod +x debian/rules
+              dpkg-buildpackage -us -uc -b
+              cp ../*.deb /src/out/
+            '
+          ls -l out/
+
+      - name: Verify package architecture
+        run: |
+          set -eu
+          deb=$(ls out/*.deb | head -1)
+          arch=$(dpkg-deb -f "$deb" Architecture)
+          echo "package: $deb -> $arch"
+          test "$arch" = "${{ matrix.arch }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: toshiba-estudio2323am-${{ matrix.arch }}
+          path: out/*.deb
+          if-no-files-found: error

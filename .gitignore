@@ -1,0 +1,27 @@
+# 构建产物
+*.o
+*.exe
+/rastertotoshiba
+/test_enc
+/out/
+/dist/
+/patterns/
+*.deb
+*.buildinfo
+*.changes
+debian/.debhelper/
+debian/files
+debian/toshiba-estudio2323am/
+
+# 抓包样本：体积大且可能含内网信息，按需单独管理
+*.pcap
+*.pcapng
+*.bin
+
+# 会话工作数据，不进版本库
+.workbuddy/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

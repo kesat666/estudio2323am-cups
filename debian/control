@@ -1,0 +1,24 @@
+Source: toshiba-estudio2323am
+Section: text
+Priority: optional
+Maintainer: e-STUDIO2323AM Linux Driver Project <noreply@example.invalid>
+Build-Depends: debhelper-compat (= 13), libcups2-dev, pkg-config
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://example.invalid/toshiba-estudio2323am
+
+Package: toshiba-estudio2323am
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}, cups (>= 2.2), cups-filters | cups-filters-core-drivers
+Description: CUPS filter for Toshiba e-STUDIO 2323AM (GDI models)
+ The e-STUDIO 2323AM and 2823AM are host-based (GDI) devices: they carry no
+ PCL or PostScript interpreter, so the page must be rasterised on the host
+ and encoded into a vendor-private stream.
+ .
+ This package provides a CUPS filter (rastertotoshiba) that accepts
+ application/vnd.cups-raster from the standard CUPS filter chain,
+ encodes each page into the device stream and writes it to the backend
+ (socket:// or usb://).
+ .
+ The same source builds on amd64 and arm64; there is no vendor binary and
+ no architecture-specific code.
