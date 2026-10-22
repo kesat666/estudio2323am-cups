@@ -13,3 +13,9 @@ override_dh_auto_test:
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/toshiba-estudio2323am
+
+# debhelper 在 buster 上默认会把符号拆成独立的 -dbgsym 包一起产出，
+# 于是 Release 页面会多出两个 "该下哪个" 的干扰项。本包只是个 filter，
+# 调试符号对使用者没有意义，直接关掉。
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

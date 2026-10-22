@@ -1,3 +1,14 @@
+toshiba-estudio2323am (0.1.1) unstable; urgency=low
+
+  * Fix the PPD banner comment, which still claimed the driver could not
+    produce a printable stream. It is shipped verbatim inside the package,
+    so it would have sent anyone debugging a print failure in the wrong
+    direction.
+  * Disable dh_strip's automatic -dbgsym split so the release ships exactly
+    two packages instead of four.
+
+ -- kesat666 <keast606@gmail.com>  Fri, 23 Oct 2026 00:40:00 +0800
+
 toshiba-estudio2323am (0.1.0) unstable; urgency=low
 
   * First functionally complete release: the filter now emits a real device
