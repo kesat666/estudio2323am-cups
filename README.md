@@ -146,7 +146,8 @@ e-STUDIO 2323AM 固件解析 → 成像
 
 ### 已采用：GitHub Actions（无需本机 Linux）
 
-仓库已初始化并完成提交，作者为 `keast666 <keast606@gmail.com>`（`debian/rules` 的可执行位已写入 git index，换行统一为 LF）。发布用 `tools/publish.sh`，它会先体检再推：
+仓库已发布：**<https://github.com/kesat666/estudio2323am-cups>**（私有仓库），主分支 `main`。
+作者 `kesat666 <keast606@gmail.com>`；`debian/rules` 的可执行位已写入 git index，换行统一为 LF。后续发布用 `tools/publish.sh`：
 
 ```bash
 ./tools/publish.sh --check     # 只体检：账号是否存在、仓库是否已建、SSH 是否就绪

@@ -18,14 +18,15 @@
 
 ## 路线 A：GitHub Actions（已采用）
 
-`.github/workflows/build.yml` 已就绪，本地仓库也已完成初始化与提交。你在 GitHub 上建好空仓库后：
+`.github/workflows/build.yml` 已就绪，仓库也已推送完成：`kesat666/estudio2323am-cups`，分支 `main`。后续只需：
 
 ```bash
-git remote add origin git@github.com:<账号>/<仓库名>.git
-git push -u origin master
+git push          # origin 已配置好，SSH 认证已通过
 ```
 
 即可在 Actions 页面看到 `build (amd64)` 与 `build (arm64)` 两个 job 并行，产物是 `.deb` 形式的 artifact。
+
+注意：仓库是**私有**的，Actions 页面和 artifact 都需要登录 GitHub 才能访问，命令行匿名查询会得到 404（不是故障）。
 
 优点：不动本机、两个架构都真跑一遍（不是交叉编译的假设）、版本可追溯。
 缺点：需要把代码推到 GitHub（私有仓库同样可用，免费额度够）。
