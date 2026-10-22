@@ -12,9 +12,9 @@
 #   GH_TOKEN   Personal Access Token（--token 模式必填，需要 repo 权限）
 set -euo pipefail
 
-GH_USER="${GH_USER:-keast666}"
+GH_USER="${GH_USER:-kesat666}"
 GH_REPO="${GH_REPO:-estudio2323am-cups}"
-BRANCH="${BRANCH:-master}"
+BRANCH="${BRANCH:-main}"
 API="https://api.github.com"
 
 cd "$(dirname "$0")/.."
@@ -22,6 +22,12 @@ cd "$(dirname "$0")/.."
 die() { printf '\n[FAIL] %s\n' "$1" >&2; exit 1; }
 info() { printf '[ .. ] %s\n' "$1"; }
 ok()   { printf '[ OK ] %s\n' "$1"; }
+
+# 用 SSH 握手确认 GitHub 侧真实用户名（欢迎语里带的就是它）
+ssh_user() {
+    ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 \
+        -T git@github.com 2>&1 | sed -n 's/^Hi \([^!]*\)!.*/\1/p' | head -1
+}
 
 # ---------- 体检 ----------
 check() {
@@ -54,7 +60,7 @@ check() {
            "https://github.com/$GH_USER/$GH_REPO" 2>/dev/null || echo 000)
     case "$code" in
         200) ok "仓库已存在" ;;
-        404) printf '       仓库尚不存在（首次推送前需先建仓）\n' ;;
+        404) printf '       仓库尚不存在。先在 https://github.com/new 建同名空仓库（不要勾选 README / .gitignore）\n' ;;
         *)   printf '       无法确认（HTTP %s）\n' "$code" ;;
     esac
 
@@ -66,6 +72,18 @@ check() {
         printf '       指纹: %s\n' "$fp"
     else
         printf '       未生成。运行: ssh-keygen -t ed25519 -N "" -C "你的邮箱"\n'
+    fi
+
+    info "SSH 认证"
+    local real
+    real=$(ssh_user || true)
+    if [ -n "$real" ]; then
+        ok "GitHub 侧账号为 $real"
+        if [ "$real" != "$GH_USER" ]; then
+            printf '       注意: 与 GH_USER=%s 不一致，请用 GH_USER=%s 运行\n' "$GH_USER" "$real"
+        fi
+    else
+        printf '       未通过。把公钥加到 GitHub → Settings → SSH and GPG keys\n'
     fi
 
     info "远端"

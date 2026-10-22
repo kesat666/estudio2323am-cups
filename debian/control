@@ -1,11 +1,11 @@
 Source: toshiba-estudio2323am
 Section: text
 Priority: optional
-Maintainer: e-STUDIO2323AM Linux Driver Project <noreply@example.invalid>
+Maintainer: kesat666 <keast606@gmail.com>
 Build-Depends: debhelper-compat (= 13), libcups2-dev, pkg-config
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
-Homepage: https://example.invalid/toshiba-estudio2323am
+Homepage: https://github.com/kesat666/estudio2323am-cups
 
 Package: toshiba-estudio2323am
 Architecture: amd64 arm64
