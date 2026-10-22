@@ -1,16 +1,45 @@
 /*
- * tsb_enc.c — 见 tsb_enc.h 的说明
+ * tsb_enc.c — e-STUDIO 2323AM 作业流编码器
  *
- * 注意：本文件里所有标记 [TODO-PROTO] 的地方，都是等待抓包确认的私有报文。
- * 在这些 TODO 被替换之前，产出的字节流不能直接送给打印机。
+ * 报文结构已由 Windows 官方驱动的实际输出确认（tools/pjl_probe.py 可逐字节复现）：
+ *
+ *   \x1b%-12345X@PJL\r\n                     UEL + PJL 起始
+ *   @PJL SET TIMESTAMP=YYYY/MM/DD HH:MM:SS\r\n
+ *   @PJL SET COMPRESS=JBIG\r\n
+ *   @PJL SET USERNAME=<用户>\r\n
+ *   @PJL SET COVER=OFF\r\n
+ *   @PJL SET HOLD=OFF\r\n
+ *   @PJL SET ROTATESORT=OFF\r\n
+ *   @PJL SET SMOOTHING=ON|OFF\r\n
+ *   @PJL SET TONERSAVE=ON|OFF\r\n
+ *   @PJL SET DEPTCODENUM=""\r\n
+ *   @PJL SET MEDIASOURCE=AUTO\r\n
+ *   @PJL SET MEDIATYPE=PAPER\r\n
+ *   @PJL SET PAGESTATUS=START\r\n
+ *   @PJL SET COPIES=<n>\r\n
+ *   @PJL SET DUPLEX=ON|OFF\r\n             （双面时另加 BINDING=LONGEDGE|SHORTEDGE）
+ *   @PJL SET PAPER=A4\r\n
+ *   @PJL SET PAPERWIDTH=<px>\r\n
+ *   @PJL SET PAPERLENGTH=<px>\r\n
+ *   @PJL SET RESOLUTION=600\r\n
+ *   @PJL SET ORIENTATION=PORTRAIT\r\n
+ *   @PJL SET IMAGELEN=<n>\r\n
+ *   <JBIG BIE，n 字节>
+ *   @PJL SET DOTCOUNT=<黑点数>\r\n
+ *   @PJL SET PAGESTATUS=END\r\n
+ *   @PJL EOJ\r\n
+ *   \x1b%-12345X\r\n
+ *
+ * 因为 IMAGELEN 在数据前面，必须先编码完整页才能写出表头，
+ * 所以整页缓存在内存（A4/600dpi 1bpp = 4.35 MB，可接受）。
  */
 
 #include "tsb_enc.h"
+#include "tsb_jbig.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-#define TSB_MAX_BAND_BYTES (1024u * 1024u * 8u)   /* 单个 page_begin 的上限保护 */
+#include <time.h>
 
 struct tsb_ctx {
     FILE       *out;
@@ -22,8 +51,13 @@ struct tsb_ctx {
     int         cur_h;
     int         rows_done;
 
-    unsigned char *scratch;      /* PackBits 输出暂存 */
+    unsigned char *scratch;      /* 旧模式（RAW/CAPTURE）用 */
     size_t         scratch_cap;
+
+    unsigned char *page;         /* 整页 1bpp：PJL_JBIG 模式用 */
+    size_t         page_cap;
+    int            page_bpl;
+    int            copy_index;
 };
 
 /* ------------------------------------------------------------------ 基础写出 */
@@ -36,26 +70,30 @@ static int wr(tsb_ctx *c, const void *p, size_t n)
     return TSB_OK;
 }
 
-static int wr_u8(tsb_ctx *c, unsigned v)
+/* "@PJL SET KEY=VALUE\r\n" */
+static int wr_set(tsb_ctx *c, const char *k, const char *v)
 {
-    unsigned char b = (unsigned char)(v & 0xffu);
-    return wr(c, &b, 1);
+    char buf[192];
+    int n = snprintf(buf, sizeof buf, "@PJL SET %s=%s\r\n", k, v);
+
+    if (n <= 0 || (size_t)n >= sizeof buf) return TSB_ERR;
+    return wr(c, buf, (size_t)n);
 }
 
-static int wr_u16be(tsb_ctx *c, unsigned v)
+static int wr_set_long(tsb_ctx *c, const char *k, long v)
 {
-    unsigned char b[2];
-    b[0] = (unsigned char)((v >> 8) & 0xffu);
-    b[1] = (unsigned char)(v & 0xffu);
-    return wr(c, b, 2);
-}
+    char buf[64];
+    int n = snprintf(buf, sizeof buf, "%ld", v);
 
-/* 注：协议确认后如果页/作业头需要 32 位字段或校验和，在这里补 wr_u32be / wr_crc。 */
+    if (n <= 0 || (size_t)n >= sizeof buf) return TSB_ERR;
+    buf[n] = '\0';
+    return wr_set(c, k, buf);
+}
 
 /* --------------------------------------------------------------- PackBits */
 
 /*
- * 标准 PackBits：
+ * 标准 PackBits（保留给单测；真实报文用 JBIG）：
  *   n >= 0  : 后面跟 n+1 个字面字节
  *   n <  0  : 下一个字节重复 (1-n) 次
  * 返回写入字节数；容量不足返回 0。
@@ -68,7 +106,6 @@ size_t tsb_packbits_encode(const unsigned char *in, size_t n,
     if (n == 0) return 0;
 
     while (i < n) {
-        /* 找重复串 */
         size_t run = 1;
         while (i + run < n && in[i + run] == in[i] && run < 128) run++;
 
@@ -78,17 +115,13 @@ size_t tsb_packbits_encode(const unsigned char *in, size_t n,
             out[o++] = in[i];
             i += run;
         } else {
-            /* 字面串：直到遇到 2 个以上重复 */
             size_t start = i, lit = 0;
             while (i < n && lit < 128) {
                 if (i + 1 < n && in[i] == in[i + 1]) break;
                 i++;
                 lit++;
             }
-            if (lit == 0) {              /* 不可能，防御 */
-                i = start + 1;
-                lit = 1;
-            }
+            if (lit == 0) { i = start + 1; lit = 1; }
             if (o + 1 + lit > cap) return 0;
             out[o++] = (unsigned char)(lit - 1);
             memcpy(out + o, in + start, lit);
@@ -111,14 +144,12 @@ tsb_ctx *tsb_open(FILE *out, const tsb_jobopts *opts)
 
     c->out = out;
     c->opt = *opts;
-
     if (c->opt.band_height <= 0) c->opt.band_height = 128;
 
-    c->scratch_cap = 1u << 20;
-    c->scratch = (unsigned char *)malloc(c->scratch_cap);
-    if (!c->scratch) {
-        free(c);
-        return NULL;
+    if (c->opt.mode == TSB_PAYLOAD_RAW || c->opt.mode == TSB_PAYLOAD_CAPTURE) {
+        c->scratch_cap = 1u << 20;
+        c->scratch = (unsigned char *)malloc(c->scratch_cap);
+        if (!c->scratch) { free(c); return NULL; }
     }
     return c;
 }
@@ -127,6 +158,7 @@ void tsb_close(tsb_ctx *c)
 {
     if (!c) return;
     free(c->scratch);
+    free(c->page);
     free(c);
 }
 
@@ -135,37 +167,43 @@ const tsb_stats *tsb_get_stats(const tsb_ctx *c)
     return c ? &c->st : NULL;
 }
 
+/* ------------------------------------------------------------ 纸张与统计 */
+
+/* 按像素尺寸反推 PJL 的 PAPER 取值；驱动用 A4 / A3 / LETTER 这种写法。 */
+static const char *paper_name(int w, int h)
+{
+    static const struct { int w, h; const char *n; } tab[] = {
+        { 4961,  7016, "A4"     },
+        { 7016,  9921, "A3"     },
+        { 3508,  4961, "A5"     },
+        { 5100,  6600, "LETTER" },
+        { 3300,  4200, "STATEMENT" }
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+        int dw = w - tab[i].w, dh = h - tab[i].h;
+        if (dw < 0) dw = -dw;
+        if (dh < 0) dh = -dh;
+        if (dw <= 12 && dh <= 12) return tab[i].n;
+    }
+    return "CUSTOM";
+}
+
+static unsigned long count_dots(const unsigned char *p, size_t n)
+{
+    static const unsigned char pc[16] = {
+        0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4
+    };
+    unsigned long bits = 0;
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        bits += (unsigned long)(pc[p[i] & 0x0f] + pc[(p[i] >> 4) & 0x0f]);
+    return bits;
+}
+
 /* ---------------------------------------------------------------- 作业头 */
-
-static const char *slot_name(int slot)
-{
-    switch (slot) {
-    case 1:  return "TRAY1";
-    case 2:  return "TRAY2";
-    case 3:  return "BYPASS";
-    default: return "AUTO";
-    }
-}
-
-static const char *media_type_name(int t)
-{
-    switch (t) {
-    case 1:  return "THICK";
-    case 2:  return "THIN";
-    case 3:  return "RECYCLED";
-    default: return "PLAIN";
-    }
-}
-
-static int wr_line(tsb_ctx *c, const char *fmt, const char *s)
-{
-    char buf[128];
-    int n;
-
-    n = snprintf(buf, sizeof buf, fmt, s);
-    if (n <= 0 || (size_t)n >= sizeof buf) return TSB_ERR;
-    return wr(c, buf, (size_t)n);
-}
 
 int tsb_job_begin(tsb_ctx *c)
 {
@@ -174,32 +212,16 @@ int tsb_job_begin(tsb_ctx *c)
     switch (c->opt.mode) {
     case TSB_PAYLOAD_RAW:
     case TSB_PAYLOAD_CAPTURE:
-        /* 比对模式下不写任何伪报文，保证输出可与抓包数据段直接对比 */
-        return TSB_OK;
+        return TSB_OK;          /* 比对模式不加任何封装 */
 
-    case TSB_PAYLOAD_PACKBITS:
+    case TSB_PAYLOAD_PJL_JBIG:
     default:
-        /* [TODO-PROTO] 作业头：UEL / PJL / 私有魔数 / 用户名 / 作业名
-         * 抓包确认后按实际字节序列填写。下面这段是占位，不是真实协议。 */
+        /* UEL 紧跟 "@PJL" + CRLF，与驱动一致（UEL 与 @PJL 之间没有换行） */
         if (wr(c, "\x1b%-12345X", 9) != TSB_OK) return TSB_ERR;
-        if (wr(c, "@PJL JOB NAME=\"cups\"\r\n", 24) != TSB_OK) return TSB_ERR;
-        /* [TODO-PROTO] 双面 / 纸盒 / 介质
-         * 这三行是占位，真实关键字必须由 docs/protocol-re.md 的用例 8–14
-         * 抓包确认。写在这里的作用只有一个：抓包时能看出"选了哪个选项，
-         * 报文里多了哪几个字节"，从而反推真实字段位置。 */
-        if (wr_line(c, "@PJL SET DUPLEX=%s\r\n",
-                    c->opt.duplex == 0 ? "OFF" :
-                    (c->opt.duplex == 2 ? "ON/TUMBLE" : "ON")) != TSB_OK)
-            return TSB_ERR;
-        if (wr_line(c, "@PJL SET MEDIASOURCE=%s\r\n",
-                    slot_name(c->opt.input_slot)) != TSB_OK)
-            return TSB_ERR;
-        if (wr_line(c, "@PJL SET MEDIATYPE=%s\r\n",
-                    media_type_name(c->opt.media_type)) != TSB_OK)
-            return TSB_ERR;
-        break;
+        if (wr(c, "@PJL\r\n", 6) != TSB_OK) return TSB_ERR;
+        c->st.pages = 0;
+        return TSB_OK;
     }
-    return TSB_OK;
 }
 
 int tsb_job_end(tsb_ctx *c)
@@ -211,50 +233,41 @@ int tsb_job_end(tsb_ctx *c)
     case TSB_PAYLOAD_CAPTURE:
         return TSB_OK;
     default:
-        /* [TODO-PROTO] 作业尾：EOJ、计数、校验和 */
         if (wr(c, "@PJL EOJ\r\n", 10) != TSB_OK) return TSB_ERR;
         if (wr(c, "\x1b%-12345X", 9) != TSB_OK) return TSB_ERR;
-        break;
+        if (wr(c, "\r\n", 2) != TSB_OK) return TSB_ERR;
+        return TSB_OK;
     }
-    return TSB_OK;
 }
 
 /* ------------------------------------------------------------------ 页 */
 
 int tsb_page_begin(tsb_ctx *c, int width_px, int height_px, int copy_index)
 {
+    int bpl;
+
     if (!c || width_px <= 0 || height_px <= 0) return TSB_ERR;
 
-    c->cur_w     = width_px;
-    c->cur_h     = height_px;
-    c->rows_done = 0;
-    c->page_open = 1;
-    c->st.pages++;
+    c->cur_w      = width_px;
+    c->cur_h      = height_px;
+    c->rows_done  = 0;
+    c->copy_index = copy_index;
+    c->page_open  = 1;
 
-    switch (c->opt.mode) {
-    case TSB_PAYLOAD_RAW:
-        /* P4 PBM：1bpp，MSB 在左，和打印机光栅位序一致。
-         * 用途：dump 出原始位图，与抓包逐字节比对。 */
-        if (fprintf(c->out, "P4\n%d %d\n", width_px, height_px) < 0) return TSB_ERR;
-        break;
+    bpl = (width_px + 7) / 8;
+    c->page_bpl = bpl;
 
-    case TSB_PAYLOAD_CAPTURE:
-        if (fprintf(c->out, "# PAGE w=%d h=%d copy=%d\n",
-                    width_px, height_px, copy_index) < 0) return TSB_ERR;
-        break;
+    if (c->opt.mode == TSB_PAYLOAD_PJL_JBIG) {
+        size_t need = (size_t)bpl * (size_t)height_px;
 
-    default:
-        /* [TODO-PROTO] 页头：纸张尺寸、分辨率、方向、双面、省墨、副本号
-         * 差分打印矩阵（README 4.2）就是用来定位这几个字段的。 */
-        if (wr_u8(c, 0x1b) != TSB_OK) return TSB_ERR;
-        if (wr_u8(c, 0x01) != TSB_OK) return TSB_ERR;      /* 占位 */
-        if (wr_u16be(c, (unsigned)width_px) != TSB_OK) return TSB_ERR;
-        if (wr_u16be(c, (unsigned)height_px) != TSB_OK) return TSB_ERR;
-        if (wr_u16be(c, (unsigned)c->opt.x_dpi) != TSB_OK) return TSB_ERR;
-        if (wr_u16be(c, (unsigned)c->opt.y_dpi) != TSB_OK) return TSB_ERR;
-        if (wr_u8(c, (unsigned)c->opt.duplex) != TSB_OK) return TSB_ERR;
-        if (wr_u8(c, (unsigned)c->opt.toner_save) != TSB_OK) return TSB_ERR;
-        break;
+        if (need > c->page_cap) {
+            unsigned char *np = (unsigned char *)realloc(c->page, need);
+            if (!np) { c->page_open = 0; return TSB_ERR; }
+            c->page = np;
+            c->page_cap = need;
+        }
+        /* 未写到的行保持白色（0 = 白，与 PBM/驱动一致） */
+        memset(c->page, 0, need);
     }
     return TSB_OK;
 }
@@ -262,91 +275,130 @@ int tsb_page_begin(tsb_ctx *c, int width_px, int height_px, int copy_index)
 int tsb_page_band(tsb_ctx *c, const unsigned char *band, int y0, int nlines,
                   int bytes_per_line)
 {
-    size_t raw;
+    if (!c || !band || !c->page_open || nlines <= 0) return TSB_ERR;
+    if (y0 < 0 || y0 + nlines > c->cur_h) return TSB_ERR;
 
-    (void)y0;
-    if (!c || !c->page_open || !band) return TSB_ERR;
-    if (nlines <= 0 || bytes_per_line <= 0) return TSB_OK;
+    if (c->opt.mode == TSB_PAYLOAD_PJL_JBIG) {
+        int copy = bytes_per_line;
 
-    raw = (size_t)nlines * (size_t)bytes_per_line;
-    if (raw > TSB_MAX_BAND_BYTES) return TSB_ERR;
-
-    c->st.bands++;
-
-    switch (c->opt.mode) {
-    case TSB_PAYLOAD_RAW:
-        /* 直接吐原始位图，不加任何封装 */
-        return wr(c, band, raw);
-
-    case TSB_PAYLOAD_CAPTURE: {
-        /* 十六进制转储，带绝对偏移，便于和抓包对齐 */
-        int y;
-        for (y = 0; y < nlines; y++) {
-            int x;
-            const unsigned char *row = band + (size_t)y * (size_t)bytes_per_line;
-            if (fprintf(c->out, "%06ld ",
-                        (long)((c->rows_done + y) * bytes_per_line)) < 0)
-                return TSB_ERR;
-            for (x = 0; x < bytes_per_line; x++)
-                fprintf(c->out, "%02x", row[x]);
-            fputc('\n', c->out);
-        }
-        c->rows_done += nlines;
+        if (copy > c->page_bpl) copy = c->page_bpl;
+        memcpy(c->page + (size_t)y0 * c->page_bpl, band,
+               (size_t)copy * (size_t)nlines);
+        if (y0 + nlines > c->rows_done) c->rows_done = y0 + nlines;
+        c->st.bands++;
         return TSB_OK;
     }
 
-    default: {
-        size_t out_n;
-        int y;
+    /* 旧模式：逐带直接吐原始位图 / 转储 */
+    {
+        size_t need = (size_t)bytes_per_line * (size_t)nlines;
 
-        /* PackBits 按行压，行间不跨行（多数 GDI 机型是行独立压缩） */
-        if ((size_t)bytes_per_line * 2u + 16u > c->scratch_cap) {
-            size_t need = (size_t)bytes_per_line * 2u + 16u;
-            unsigned char *p = (unsigned char *)realloc(c->scratch, need);
-            if (!p) return TSB_ERR;
-            c->scratch = p;
+        if (need > c->scratch_cap) {
+            unsigned char *np = (unsigned char *)realloc(c->scratch, need);
+            if (!np) return TSB_ERR;
+            c->scratch = np;
             c->scratch_cap = need;
         }
-
-        for (y = 0; y < nlines; y++) {
-            const unsigned char *row = band + (size_t)y * (size_t)bytes_per_line;
-            out_n = tsb_packbits_encode(row, (size_t)bytes_per_line,
-                                        c->scratch, c->scratch_cap);
-            if (out_n == 0) return TSB_ERR;
-            /* [TODO-PROTO] 行头：行号 / 压缩后长度 / 行标志。若机器按行接受，
-             * 这里必须写；若按整带接受，则应改成整带压缩 + 带长度前置。 */
-            if (wr_u16be(c, (unsigned)out_n) != TSB_OK) return TSB_ERR;
-            if (wr(c, c->scratch, out_n) != TSB_OK) return TSB_ERR;
+        if (c->opt.mode == TSB_PAYLOAD_CAPTURE) {
+            char hdr[64];
+            int n = snprintf(hdr, sizeof hdr, "@@ y=%d lines=%d bpl=%d\n",
+                             y0, nlines, bytes_per_line);
+            if (n > 0 && wr(c, hdr, (size_t)n) != TSB_OK) return TSB_ERR;
         }
-        break;
+        if (wr(c, band, need) != TSB_OK) return TSB_ERR;
+        c->rows_done += nlines;
+        c->st.bands++;
+        return TSB_OK;
     }
-    }
-
-    c->rows_done += nlines;
-    return TSB_OK;
 }
 
 int tsb_page_end(tsb_ctx *c)
 {
     if (!c || !c->page_open) return TSB_ERR;
 
-    if (c->rows_done != c->cur_h) {
-        /* 行数不足：CUPS 侧异常，但不阻断出纸，只提示 */
-        fprintf(stderr,
-                "DEBUG: page incomplete: got %d rows, expected %d\n",
-                c->rows_done, c->cur_h);
-    }
-
-    switch (c->opt.mode) {
-    case TSB_PAYLOAD_RAW:
-    case TSB_PAYLOAD_CAPTURE:
-        break;
-    default:
-        /* [TODO-PROTO] 页尾：走纸 / 换页 / 页计数 */
-        if (wr_u8(c, 0x0c) != TSB_OK) return TSB_ERR;
-        break;
-    }
-
     c->page_open = 0;
-    return TSB_OK;
+
+    if (c->opt.mode != TSB_PAYLOAD_PJL_JBIG) {
+        c->st.pages++;
+        return TSB_OK;
+    }
+
+    {
+        unsigned char *bie = NULL;
+        size_t bie_len = 0;
+        char ts[32];
+        const char *paper;
+        time_t now;
+        struct tm tmv;
+
+        if (tsb_jbig_encode(c->page, c->cur_w, c->cur_h, c->page_bpl,
+                            &bie, &bie_len) != 0) {
+            fprintf(stderr,
+                    "ERROR: JBIG encode failed (w=%d h=%d) — "
+                    "此构建没有链接 libjbig，无法生成可打印报文\n",
+                    c->cur_w, c->cur_h);
+            return TSB_ERR;
+        }
+
+        /* ---- 页头：字段顺序必须与驱动一致，工具 pjl_probe 可直接比对 ---- */
+        now = time(NULL);
+#if defined(_WIN32)
+        {
+            struct tm *lt = localtime(&now);
+            if (lt) tmv = *lt; else memset(&tmv, 0, sizeof tmv);
+        }
+#else
+        if (!localtime_r(&now, &tmv)) memset(&tmv, 0, sizeof tmv);
+#endif
+        strftime(ts, sizeof ts, "%Y/%m/%d %H:%M:%S", &tmv);
+
+        paper = paper_name(c->cur_w, c->cur_h);
+
+        if (wr_set(c, "TIMESTAMP",     ts)                                  != TSB_OK) goto fail;
+        if (wr_set(c, "COMPRESS",      "JBIG")                              != TSB_OK) goto fail;
+        if (wr_set(c, "USERNAME",      c->opt.username[0] ? c->opt.username : "cups") != TSB_OK) goto fail;
+        if (wr_set(c, "COVER",         "OFF")                               != TSB_OK) goto fail;
+        if (wr_set(c, "HOLD",          "OFF")                               != TSB_OK) goto fail;
+        if (wr_set(c, "ROTATESORT",    "OFF")                               != TSB_OK) goto fail;
+        if (wr_set(c, "SMOOTHING",     "OFF")                               != TSB_OK) goto fail;
+        if (wr_set(c, "TONERSAVE",     c->opt.toner_save ? "ON" : "OFF")    != TSB_OK) goto fail;
+        if (wr_set(c, "DEPTCODENUM",   "\"\"")                              != TSB_OK) goto fail;
+        if (wr_set(c, "MEDIASOURCE",   "AUTO")                              != TSB_OK) goto fail;
+        if (wr_set(c, "MEDIATYPE",     "PAPER")                             != TSB_OK) goto fail;
+        if (wr_set(c, "PAGESTATUS",    "START")                             != TSB_OK) goto fail;
+        if (wr_set_long(c, "COPIES",   (long)(c->opt.copies > 0 ? c->opt.copies : 1)) != TSB_OK) goto fail;
+
+        /* 双面：DUPLEX 只有 ON/OFF，装订方向是独立字段 BINDING */
+        if (wr_set(c, "DUPLEX", c->opt.duplex ? "ON" : "OFF") != TSB_OK) goto fail;
+        if (c->opt.duplex) {
+            if (wr_set(c, "BINDING",
+                       c->opt.duplex == 2 ? "SHORTEDGE" : "LONGEDGE") != TSB_OK)
+                goto fail;
+        }
+
+        if (wr_set(c, "PAPER",         paper)                               != TSB_OK) goto fail;
+        if (wr_set_long(c, "PAPERWIDTH",  (long)c->cur_w)                   != TSB_OK) goto fail;
+        if (wr_set_long(c, "PAPERLENGTH", (long)c->cur_h)                   != TSB_OK) goto fail;
+        if (wr_set_long(c, "RESOLUTION",  (long)(c->opt.x_dpi > 0 ? c->opt.x_dpi : 600)) != TSB_OK) goto fail;
+        if (wr_set(c, "ORIENTATION",   "PORTRAIT")                          != TSB_OK) goto fail;
+        if (wr_set_long(c, "IMAGELEN", (long)bie_len)                       != TSB_OK) goto fail;
+
+        /* ---- 数据段 ---- */
+        if (wr(c, bie, bie_len) != TSB_OK) goto fail;
+
+        /* ---- 页尾 ---- */
+        if (wr_set_long(c, "DOTCOUNT",
+                        (long)count_dots(c->page,
+                                         (size_t)c->page_bpl * (size_t)c->cur_h)) != TSB_OK)
+            goto fail;
+        if (wr_set(c, "PAGESTATUS", "END") != TSB_OK) goto fail;
+
+        free(bie);
+        c->st.pages++;
+        return TSB_OK;
+
+fail:
+        free(bie);
+        return TSB_ERR;
+    }
 }

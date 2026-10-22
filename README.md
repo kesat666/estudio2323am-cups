@@ -12,6 +12,7 @@
 
 | 项目 | 结论 | 依据 |
 |---|---|---|
+| **数据格式** | **标准 PJL 外壳 + 标准 JBIG（T.82）压缩**——不是私有协议 | 驱动实际输出实测，见 `docs/protocol-re.md` |
 | 页面描述语言 | GDI（主机渲染），无 PCL/PS | 东芝官方规格页 `Page Description Language: Graphic Device Interface`；同代 2829A 系列才有 PCL6/PS3/PCL5e |
 | 官方 Linux 驱动 | 无 | 东芝下载站中 CUPS 驱动只覆盖 PCL/PS 机型（ColorMFP 系列），2323AM 的下载项只有 Windows |
 | Windows 侧 | x64 官方已有，ARM64 无且不可能用 x64 | 兼容列表 32/64 bit；微软 Windows on Arm FAQ 明确要求打印驱动原生 Arm64、安装程序也须 Arm64 |
@@ -138,7 +139,8 @@ e-STUDIO 2323AM 固件解析 → 成像
 ├── Dockerfile                buildx 多架构构建（amd64 + arm64）
 ├── src/
 │   ├── tsb_enc.h             编码器接口（协议无关部分已定型）
-│   ├── tsb_enc.c             编码器核心：缓冲、分带、PackBits、raw/capture dump
+│   ├── tsb_enc.c             编码器核心：PJL 报文 + 整页缓冲（+ raw/capture 比对模式）
+│   ├── tsb_jbig.c            libjbig 封装：1bpp 位图 → JBIG BIE
 │   ├── cups_filter.c         CUPS filter 外壳：raster 读取 → 编码 → stdout
 │   └── test_enc.c            核心单测 + 差分图案生成器，不依赖 CUPS
 ├── test/stub/cups/           无 CUPS 头文件时的语法校验存根（不参与正式构建）
@@ -152,6 +154,7 @@ e-STUDIO 2323AM 固件解析 → 成像
 ├── .github/workflows/build.yml   CI：amd64 + arm64 自动构建与打包
 └── tools/
     ├── probe_printer.py      Step 0：先确认是否真的只有私有协议
+    ├── pjl_probe.py          解析 / 重放作业流（--parse / --selftest）
     ├── port9100_proxy.py     Step 1：9100 代理，截获驱动吐出的原始作业流
     ├── selftest_proxy.py     代理的离线自测（假打印机 + 字节级比对）
     └── analyze_stream.py     抓包分析：--stats / --entropy / --diff / --hexdump
@@ -269,29 +272,33 @@ dpkg-buildpackage -us -uc -a arm64
 
 ## 八、进度与剩余未知
 
-已经确定的（不再是问题）：
+**协议已解出。** 用 Windows 官方驱动的输出做实测，结论是标准 PJL + 标准 JBIG：
 
-- ~~是否支持 IPP/PCL~~ → **已实测确认：都不支持**，私有协议路线确定。
-- ~~目标系统与包格式~~ → **麒麟 V10（arm64）+ 统信 UOS 20（amd64），deb**，基线见 §1.1。
-- ~~双面是否要做~~ → **本机已装 MD-0107，双面必做**。PPD 保留 `Duplex`，但**默认单面**，
-  协议确认前不下发双面指令。
-- ~~纸盒选择是否要做~~ → **不做**。无第二纸盒、用户侧无需求，PPD 已移除 `InputSlot` / `MediaType`，
-  仅保留环境变量 `TSB_SLOT` / `TSB_MEDIATYPE` 供逆向差分实验。
-
-仍然缺的，只有**驱动吐出的那串字节**。取法见 `docs/capture-guide.md`，按省力程度排序：
-
-1. **打印到文件**（首选）：给队列建一个 `FILE:` 或 `Local Port` 指向文件的端口，打印即得 `.prn`。
-   不用抓包、不用接线，最干净。
-2. **9100 代理**：`python tools/port9100_proxy.py --target <打印机IP> --label white`，
-   把队列端口指向 `127.0.0.1:19100`。能同时抓到 PJL 状态回读（字段线索）。
-3. **Wireshark**：前两条都不行时才用。
-
-最低六份：`white` / `black` / `checker` / `single` / `text` / `duplex`（清单与驱动设置见
-`capture-guide.md` 第四节）。抓完先跑这两条命令，第一个数字决定后面两周的工作量：
-
-```bash
-python tools/analyze_stream.py --stats captures/white.bin --page a4-600
-python tools/analyze_stream.py --diff  captures/text.bin captures/duplex.bin
+```
+\x1b%-12345X@PJL\r\n
+@PJL SET COMPRESS=JBIG\r\n  + 20 条字段（纸张/分辨率/双面/省墨…）
+@PJL SET IMAGELEN=39106\r\n
+<JBIG BIE，39106 字节>          ← ITU-T T.82，libjbig 直接编
+@PJL SET DOTCOUNT=…\r\n @PJL SET PAGESTATUS=END\r\n @PJL EOJ\r\n
 ```
 
-另外还缺一条信息：**有没有 ARM64 真机（麒麟）能验证产物**。没有的话只能靠 CI 的架构校验 + 目标机试装。
+已验证的四件事（详见 `docs/protocol-re.md` §4）：
+
+- PJL 层用解析结果反向组包，与原文件**逐字节一致**（39,700 字节，0 差异）
+- 厂商数据段用 `jbgtopbm` 解出 `4961×7016`，与 `PAPERWIDTH/PAPERLENGTH` 吻合
+- 解码结果重编码再解码，与原图 `cmp` **完全一致**
+- **我们自己编码器生成的报文**解码回 4961×7016，画的黑带位置和黑点数完全正确
+
+已经确定的（不再是问题）：IPP/PCL 都不支持；目标是麒麟 V10(arm64)+UOS 20(amd64)；
+双面已装 MD-0107 必做但默认单面；无第二纸盒、不做纸盒选择。
+
+**剩余风险集中在"上机"这一层**，代码层面已无未知：
+
+1. 打印机是否接受 jbigkit 的 BIE 头（解码方向已验证，编码方向只能上机看）
+2. 多页作业的 `EOJ` 位置（单页样本无法区分）
+3. 双面 `BINDING` 是否真在双面时下发（需在驱动对话框手动勾双面再抓一份）
+
+**下一步**：把 `.deb` 装到麒麟/统信上，`lpadmin` 建队列，按
+`docs/protocol-re.md` §7 的清单逐项打。同时需要你提供**一份在 Windows 驱动里
+手动勾选双面后打印的 `.prn`**（走 `docs/capture-guide.md` 的路线 A 就行），
+用来确认 `DUPLEX=ON` + `BINDING=LONGEDGE` 这个组合。

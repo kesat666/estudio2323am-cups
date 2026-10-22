@@ -1,158 +1,184 @@
-# 私有协议逆向操作手册
+# e-STUDIO 2323AM 作业流协议（已解出）
 
-这份文档是**工作中的记录表**，不是结论。每抓到一组样本就把字段填进来，填满之日就是编码器可以收工之日。
+**结论：不是私有协议。** 外壳是标准 PJL，压缩是标准 JBIG（ITU-T T.82），
+没有任何自定义压缩算法。项目原计划里风险最高的那部分（"压缩算法要是私有的就做不出来"）
+已经不存在了。
 
-前置：先跑 `tools/probe_printer.py` 确认它不是 IPP/PCL/PS 机型。如果是，本手册整份作废，直接装通用驱动。
-
----
-
-## 0. 采样准备
-
-### 网络抓包
-```bash
-# 只抓打印通道，避免噪音
-sudo tcpdump -i any -s 0 -w job-%Y%m%d-%H%M%S.pcap host 192.168.1.50 and port 9100
-```
-
-Wireshark 里：右键任意包 → Follow → TCP Stream → Show data as `Raw` → Save as。得到的就是纯 payload，可直接喂给 `tools/analyze_stream.py`。
-
-**必须确认是否抓到反向数据**（printer → host）。Filter 里 `tcp.stream eq N` 看是否有回包。
-
-### USB 抓包
-```bash
-sudo modprobe usbmon
-lsusb                      # 找到 08a6:8056
-sudo tcpdump -i usbmon1 -s 0 -w usb.pcap
-```
-Windows 侧用 USBPcap 抓同一份文档，两边对照能互相印证字段。
-
-### 图案集
-```bash
-make patterns              # 生成 patterns/01..07 共 7 张 PBM（A4 600dpi 1bpp）
-```
-转 PDF 后从 Windows 驱动打印，每张单独抓一份 pcap。
-
-> 要点：**打印机必须与 PC 同时钟、同纸张设置**，否则差分比对会被无关字段污染。
+解出方式：在 Windows 上把官方 GDI 驱动的输出用 `Local Port` 重定向成文件，
+拿到 39,700 字节的真实作业流，然后解析 + 反向组包比对 + 解码验证。
+方法见 `docs/capture-guide.md`，工具见 `tools/pjl_probe.py`。
 
 ---
 
-## 1. 用例矩阵（逐格填写）
+## 1. 完整报文结构
 
-| # | 图案 | 抓包文件 | 报文总长 | 与全白页的差异区间 | 结论 |
-|---|---|---|---|---|---|
-| 1 | 全白 | | | — | 压缩下限 |
-| 2 | 全黑 | | | | 压缩上限 |
-| 3 | 1px 棋盘 | | | | 最坏情况 |
-| 4 | 上白下黑 | | | | 分带边界 |
-| 5 | 左上 4 点 | | | | 位图起始偏移 |
-| 6 | 横条纹 2px | | | | 行独立性 |
-| 7 | 50% 网点 | | | | 半色调位置 |
-
-补充用例（第二批次）。**每一项都必须与用例 1（全白 A4 单面）严格只差一个变量**，
-否则差异区间无法归因：
-
-| # | 变量 | 抓包文件 | 变化区间 | 结论 |
-|---|---|---|---|---|
-| 8 | A4 → A3 | | | 纸张尺寸字段 |
-| 9 | 单面 → 双面长边（DuplexNoTumble） | | | duplex 字段位置 |
-| 10 | 单面 → 双面短边（DuplexTumble） | | | 长边/短边如何区分 |
-| 11 | 600dpi → 其他（若可设） | | | 分辨率字段 |
-| 12 | 省墨 关 → 开 | | | 省墨位 |
-| 13 | 同一页 × 2 份 | | | 作业/页边界 |
-| 14 | 两份不同文档连打 | | | 作业结束标记 |
-| 15 | 单面 → 双面 + 手送 | | | 两字段是否共字节/位序（交叉验证） |
-
-> 纸盒相关用例已按现场条件删除：本机只有标配 250 张纸盒 + 100 张手送，
-> **未加装 MY-1043-B 第二纸盒**，用户侧也不需要纸盒选择。PPD 不再暴露
-> `InputSlot` / `MediaType`，减少逆向面。若将来要支持，先用环境变量
-> `TSB_SLOT` / `TSB_MEDIATYPE` 强制取值做差分，逆出字段后再加回 PPD。
-
-用例 15 的判读要点：
-
-- 若双面与手送共用同一字节的不同 bit，单独改一项只会看到"整字节变化"，
-  必须交叉打印才能定位位序。
-- 双面单元 MD-0107 **已确认加装**，是必支持功能，但仍默认单面：
-  协议未定时宁可打单面，也不要错送双面指令导致卡纸。
-
----
-
-## 2. 报文结构记录
-
-填这张表之前不要写编码器。
+一页 A4 / 600dpi / 单面的实际字节（`C:\captures\white.prn`，39,700 字节）：
 
 ```
-+------------------+--------+------------------------------------------+
-| 区域             | 长度   | 内容 / 判定依据                          |
-+------------------+--------+------------------------------------------+
-| 作业头           |        | UEL? PJL? 魔数? 用户名? 作业名?          |
-| 页头             |        | 宽/高/分辨率/方向/纸盒/duplex/省墨       |
-| 分带头           |        | 行号? 压缩后长度? 标志位?                |
-| 位图数据         |        | 压缩算法: ____________                   |
-| 页尾             |        | 换页? 页计数?                            |
-| 作业尾           |        | EOJ? 校验和?                             |
-+------------------+--------+------------------------------------------+
+偏移 0x000  1b 25 2d 31 32 33 34 35 58     \x1b%-12345X   UEL，无换行紧跟 @PJL
+偏移 0x009  "@PJL\r\n"
+偏移 0x00F  "@PJL SET TIMESTAMP=2026/10/22 23:22:01\r\n"
+            "@PJL SET COMPRESS=JBIG\r\n"                ← 压缩方式，标准 JBIG
+            "@PJL SET USERNAME=Administrator\r\n"
+            "@PJL SET COVER=OFF\r\n"
+            "@PJL SET HOLD=OFF\r\n"
+            "@PJL SET ROTATESORT=OFF\r\n"
+            "@PJL SET SMOOTHING=OFF\r\n"
+            "@PJL SET TONERSAVE=OFF\r\n"
+            "@PJL SET DEPTCODENUM=\"\"\r\n"
+            "@PJL SET MEDIASOURCE=AUTO\r\n"
+            "@PJL SET MEDIATYPE=PAPER\r\n"
+            "@PJL SET PAGESTATUS=START\r\n"
+            "@PJL SET COPIES=1\r\n"
+            "@PJL SET DUPLEX=OFF\r\n"
+            "@PJL SET PAPER=A4\r\n"
+            "@PJL SET PAPERWIDTH=4961\r\n"                ← 像素宽度
+            "@PJL SET PAPERLENGTH=7016\r\n"               ← 像素高度
+            "@PJL SET RESOLUTION=600\r\n"
+            "@PJL SET ORIENTATION=PORTRAIT\r\n"
+偏移 0x1F5  "@PJL SET IMAGELEN=39106\r\n"              ← 数据段长度
+偏移 0x20A  <JBIG BIE，39106 字节>
+偏移 0x0F0A "@PJL SET DOTCOUNT=855608\r\n"             ← 本页黑点数
+            "@PJL SET PAGESTATUS=END\r\n"
+            "@PJL EOJ\r\n"
+            "\x1b%-12345X\r\n"                          ← 结尾 UEL + CRLF
 ```
 
-### 关键判定：压缩方式
+要点：
 
-用 `01-white` 和 `02-black` 的报文长度直接判断：
+- **UEL 与 `@PJL` 之间没有换行**，`@PJL` 后面直接 `\r\n`。
+- 所有 SET 行以 `\r\n` 结尾，**顺序固定**，字段名全大写。
+- **`IMAGELEN` 在数据之前**，所以编码器必须先编完整页、拿到长度，才能写表头。
+  这是 filter 里整页缓冲（A4 4.35 MB）的唯一原因。
+- 尾部 `DOTCOUNT` 是黑点总数，仅统计用；`PAGESTATUS=END` 与 `EOJ` 收尾。
 
-| 观测 | 推断 |
-|---|---|
-| 全白页只有几十~几百字节 | RLE / PackBits / 行内行程 |
-| 全白页 ≈ A4 原始大小 ÷ 8（约 4.3MB） | 无压缩，直传 1bpp |
-| 有 `FF D8` 或 `FF xx` 帧头 | JPEG（常见于整页彩色，黑白也可能用） |
-| 位平面渐变 + 固定头 | MMR/G4 或 JBIG |
-| 长度 = 原始 + 每行固定开销 | 行头 + 原始位图 |
+**`tools/pjl_probe.py --selftest` 用解析结果重新组包，与原始文件逐字节一致**
+（39,700 → 39,700 字节，0 字节差异）。这是本节可信的依据。
 
-验证手段：用 `TSB_DUMP_RAW` 模式把同一页 dump 成 PBM，和抓包里疑似位图段逐字节比。
+## 2. 字段取值表
 
-```bash
-# 从 filter 直接倒原始位图（不需要打印机）
-TSB_MODE=raw rastertotoshiba 1 u t 1 "media=A4" page.pdf.raster > dump.pbm
-```
-
----
-
-## 3. 回放验证（硬标准）
-
-三步，缺一不可：
-
-1. **原样回放**：把抓到的 payload 直接 `nc` 给打印机，确认能出纸。
-   ```bash
-   nc 192.168.1.50 9100 < sample-01-white.bin
-   ```
-   出不来 → 说明抓包不完整（少了反向握手，或漏了某个包）。
-
-2. **自编码比对**：用自研编码器生成同一页的报文，与抓包 `cmp` 逐字节相等。
-   ```bash
-   make && TSB_MODE=packbits ./rastertotoshiba ... > mine.bin
-   cmp -l mine.bin sample-01-white.bin | head
-   ```
-
-3. **交叉验证**：换成 `03-checker1`（最坏情况）重复第 2 步。只有全白页相等是巧合，两张都相等才算逆完。
-
----
-
-## 4. 已知风险与对策
-
-| 风险 | 现象 | 对策 |
+| 字段 | 观测值 | 说明 / 来源 |
 |---|---|---|
-| 需要双向握手 | 原样回放不出纸，但 Windows 能打 | 抓全双工；在 filter 里实现回读循环（socket 双向） |
-| 带滚动校验 | 改一个字节就整页作废 | 定位校验字段，试 CRC16/CRC32/和校验 |
-| 多段拼接 | 位图被切到多个 TCP 段中间有控制字 | 按长度字段切分，不要按 TCP 边界切 |
-| 固件差异 | 同型号不同固件版本报文不同 | 记录固件版本（TopAccess → 设备信息） |
+| `COMPRESS` | `JBIG` | 固定。数据段即 T.82 BIE |
+| `USERNAME` | `Administrator` | Windows 登录用户；我们写 CUPS 的 argv[2] |
+| `COVER` / `HOLD` | `OFF` | 固定 |
+| `ROTATESORT` | `OFF` / `ON` | 旋转分页 |
+| `SMOOTHING` | `OFF` / `ON` | 平滑（2400×600 就靠它） |
+| `TONERSAVE` | `OFF` / `ON` | 省墨，对应 PPD 的 TonerSave |
+| `MEDIASOURCE` | `AUTO`、`MANUALFEED` | 手送是 `MANUALFEED`，不是常见的 `BYPASS` |
+| `MEDIATYPE` | `PAPER` | 普通纸；厚纸等取值未采集 |
+| `PAGESTATUS` | `START`（页头）/ `END`（页尾） | 同一字段两处出现，**靠位置区分** |
+| `COPIES` | `1` | CUPS 默认只传 1，多份由 CUPS 复制 |
+| `DUPLEX` | `OFF` / `ON` | **只有通断**，见 §3 |
+| `BINDING` | `LONGEDGE` / `SHORTEDGE` | 双面时才有，见 §3 |
+| `PAPER` | `A4`、`A3`、`CUSTOM` | 按像素尺寸反推 |
+| `PAPERWIDTH` / `PAPERLENGTH` | 4961 / 7016 | 像素，600dpi 下的 A4 |
+| `RESOLUTION` | `600` | 只观测到 600 |
+| `ORIENTATION` | `PORTRAIT` | 横向由驱动先旋转光栅，仍报 PORTRAIT |
+| `IMAGELEN` | 39106 | 数据段字节数 |
+| `DOTCOUNT` | 855608 | 黑点数，统计用 |
 
----
+字段名与取值还有第二个独立来源：驱动 DLL
+`C:\Windows\System32\spool\drivers\x64\3\eSSh6OCM.dll` 里的 PJL 模板字符串，
+与实测报文完全吻合，并额外暴露了本机没打印到的 `BINDING`、`MANUALFEED`。
 
-## 5. 进度
+## 3. 双面：是两个字段，不是一个
 
-- [ ] 抓包环境就绪
-- [ ] 7 张图案抓完
-- [ ] 判定压缩算法
-- [ ] 作业头/页头字段填完
-- [ ] 原样回放成功
-- [ ] 全白页自编码逐字节相等
-- [ ] 棋盘页自编码逐字节相等
-- [ ] 双面 / A3 支持
-- [ ] 打包 amd64 + arm64
+这是最容易搞错的地方，驱动 DLL 里能直接看到：
+
+```
+@PJL SET DUPLEX=OFF
+@PJL SET DUPLEX=ON
+@PJL SET BINDING=LONGEDGE
+@PJL SET BINDING=SHORTEDGE
+@PJL SET MANUALDUPLEX=FLIPSIDE      ← 手动双面（手送翻面），另一回事
+```
+
+所以：
+
+| 模式 | 下发 |
+|---|---|
+| 单面 | `DUPLEX=OFF` |
+| 双面长边装订 | `DUPLEX=ON` + `BINDING=LONGEDGE` |
+| 双面短边装订 | `DUPLEX=ON` + `BINDING=SHORTEDGE` |
+
+**不要写 `DUPLEX=FLIPSIDE`**——那是 `MANUALDUPLEX` 的取值，语义完全不同。
+
+本机已确认加装 MD-0107 双面单元，双面是必支持功能。但 PPD 里仍默认单面：
+协议未上机验证前，宁可打单面，也不要错送双面指令导致卡纸。
+
+## 4. 数据段：标准 JBIG BIE
+
+`COMPRESS=JBIG` 之后紧跟的是 ITU-T T.82 的 BIE（Bi-level Image Entity）：
+
+```
+00 00 01 00   DL   = 256      256 行一条带
+00 00 13 61   D    = 4961     ← 等于 PAPERWIDTH
+00 00 1b 68   RP   = 7016     ← 等于 PAPERLENGTH
+00 00 00 80   L0   = 128      默认表大小
+00 00 03 48   MX   = 840      ATMOVE 最大 x 偏移
+ff            MY   = 255
+02 ff 02 ff 02 ...            SC/SDNORM marker，之后是算术编码数据
+```
+
+编码参数对齐（`src/tsb_jbig.c`）：
+
+- **`order=0`**：jbigkit 默认是 `JBG_ILEAVE|JBG_SMID`（0x3），写出来的头是
+  `DL=0x40100`；厂商用 order=0，头是 `DL=0x100`。必须显式设 0。
+- `L0=128`、`MY=255` 可对齐。`MX=840` 无法对齐：jbigkit 的 `MX_MAX=127`，
+  它的 `jbg_enc_options` 在 `my>=128` 时还会跳过 mx 的设置。
+  MX 只影响编码器的 ATMOVE 优化，不影响解码正确性，属于可接受差异。
+
+### 已做的四项验证
+
+| # | 验证 | 结果 |
+|---|---|---|
+| 1 | PJL 层反向组包 | 39,700 字节**逐字节一致** |
+| 2 | 厂商数据段解码 | `jbgtopbm` 解出 `P4 4961 7016`，尺寸与字段吻合 |
+| 3 | 解码结果重编码 | 39,106 → 37,055 字节，再解码与原图 `cmp` **完全一致** |
+| 4 | 我们自己的编码器端到端 | 生成的 `.prn` 解码回 4961×7016，画的第 100–199 行黑带、7000–7015 行黑边**位置与黑点数完全正确** |
+
+第 4 项是本项目的关键闭环：`src/tsb_enc.c` 输出的报文能被标准 JBIG 解码器还原成
+预期图像，说明位图极性（1=黑）、行对齐、位序、页高都正确。
+
+## 5. 还没验证的（上真机才能确认）
+
+诚实标注，不要当成已知：
+
+1. **打印机是否接受 jbigkit 产出的 BIE 头**。解码方向已通过，编码方向只能上机看。
+   若出花屏或拒收，先把 `order` 改成 `JBG_SEQ`，或去掉 `my=255` 试单条带。
+2. **多页作业的 EOJ 位置**。当前实现是每页 `PAGESTATUS=END`、整个作业末尾一个
+   `EOJ`。单页样本无法区分"每页 EOJ"与"作业末尾 EOJ"。
+3. **`BINDING` 是否真在双面时下发**。本机 `Set-PrintConfiguration -DuplexingMode`
+   没能改到 GDI 驱动的 DEVMODE（打出来的样本仍是 `DUPLEX=OFF`），这一条只有
+   在驱动对话框里手动勾双面再打印才能确认。
+4. **`MEDIATYPE` 厚纸取值**、`PAPER` 的完整取值表。
+5. **`DOTCOUNT` 是否被校验**。若打印机拿它做校验，算错会拒页。
+
+## 6. 工具
+
+```bash
+# 解析任意作业流，打印字段表 + BIE 头 + 压缩比
+python tools/pjl_probe.py --parse C:\captures\white.prn
+
+# 用解析结果重新组包，逐字节比对（验证理解是否正确）
+python tools/pjl_probe.py --selftest C:\captures\white.prn
+
+# 抓真实作业流（驱动端口指向代理）
+python tools/port9100_proxy.py --target 192.168.1.50 --label white
+
+# 通用统计（熵 / 压缩率 / 差分）
+python tools/analyze_stream.py --stats captures/white.bin --page a4-600
+```
+
+## 7. 上机验证清单
+
+装好 `.deb` 后按顺序打，每步只看一个变量：
+
+1. 一页空白 A4 → 出白纸、不卡纸 = 报文被接受
+2. 一页实心黑块 → 位置和大小对 = 位图极性、行对齐正确
+3. 一页正文 → 字迹不糊、不偏移 = 分辨率与 PAPERWIDTH 正确
+4. 双面长边 → 背面朝向正确 = DUPLEX + BINDING 正确
+5. 连续两页 → 页序正确、不叠印 = EOJ 位置正确
+
+任何一步不对，把现象告诉我，对照 §5 的怀疑点逐个排。

@@ -40,33 +40,47 @@ endif
 # 链接顺序要求：cupsimage 依赖 cups 的符号，必须排在前面
 CUPS_LINK_LIBS := $(strip $(CUPS_IMAGE_LIBS) $(CUPS_LIBS))
 
+# libjbig（ITU-T T.82 JBIG）：驱动实测头里是 @PJL SET COMPRESS=JBIG，
+# 数据段就是标准 BIE，所以压缩必须用 libjbig，不能用自研算法。
+# 头文件存在即启用，编译期加 -DTSB_HAVE_JBIG；不存在时 tsb_jbig.c 退化为
+# 空实现（能编译、能单测，但出不了可打印报文，运行时会明确报错）。
+JBIG_HDR    := $(wildcard /usr/include/jbig.h) $(wildcard /usr/local/include/jbig.h)
+ifneq ($(strip $(JBIG_HDR)),)
+JBIG_CFLAGS := -DTSB_HAVE_JBIG
+JBIG_LIBS   := -ljbig
+endif
+# 允许外部覆盖（交叉编译 sysroot 里的 jbig.h 不在默认路径时）
+JBIG_CFLAGS ?=
+JBIG_LIBS   ?=
+
 CFLAGS      ?= -O2
 CFLAGS      += -std=c99 -Wall -Wextra -D_POSIX_C_SOURCE=200809L
 LDFLAGS     ?=
 
 BIN         := rastertotoshiba
 TESTBIN     := test_enc
-SRC         := src/tsb_enc.c
+SRC         := src/tsb_enc.c src/tsb_jbig.c
 FILTER_SRC  := src/cups_filter.c $(SRC)
 TEST_SRC    := src/test_enc.c $(SRC)
+HDRS        := src/tsb_enc.h src/tsb_jbig.h
 
 .PHONY: all test syntax patterns install uninstall clean deb help
 
 all: $(BIN)
 
-$(BIN): $(FILTER_SRC) src/tsb_enc.h
-	$(CC) $(CFLAGS) $(CUPS_CFLAGS) -o $@ $(FILTER_SRC) $(CUPS_LINK_LIBS) $(LDFLAGS)
+$(BIN): $(FILTER_SRC) $(HDRS)
+	$(CC) $(CFLAGS) $(JBIG_CFLAGS) $(CUPS_CFLAGS) -o $@ $(FILTER_SRC) $(CUPS_LINK_LIBS) $(JBIG_LIBS) $(LDFLAGS)
 
-$(TESTBIN): $(TEST_SRC) src/tsb_enc.h
-	$(CC) $(CFLAGS) -o $@ $(TEST_SRC) $(LDFLAGS)
+$(TESTBIN): $(TEST_SRC) $(HDRS)
+	$(CC) $(CFLAGS) $(JBIG_CFLAGS) -o $@ $(TEST_SRC) $(JBIG_LIBS) $(LDFLAGS)
 
 test: $(TESTBIN)
 	./$(TESTBIN) --selftest
 
 # 没装 libcups2-dev 时，用存根头文件只做语法检查（抓拼写/类型错误）
 syntax:
-	$(CC) -std=c99 -Wall -Wextra -fsyntax-only -I test/stub $(FILTER_SRC)
-	$(CC) -std=c99 -Wall -Wextra -fsyntax-only $(TEST_SRC)
+	$(CC) -std=c99 -Wall -Wextra $(JBIG_CFLAGS) -fsyntax-only -I test/stub $(FILTER_SRC)
+	$(CC) -std=c99 -Wall -Wextra $(JBIG_CFLAGS) -fsyntax-only $(SRC)
 
 patterns: $(TESTBIN)
 	mkdir -p patterns

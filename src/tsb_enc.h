@@ -4,11 +4,14 @@
  * 设计原则：
  *   - 这里只做"位图 -> 字节流"，不做排版、不做光栅化（那些 CUPS 上游已经做完）。
  *   - 不包含任何 cups 头文件，可在 Windows/Linux/任意架构编译、单测、回放。
- *   - 协议未确认前，tsb_page_band() 的具体报文由 TSB_PAYLOAD_MODE 决定：
- *       RAW      : 直接输出 1bpp 原始位图（用于和抓包做逐字节比对，这是逆向前提）
- *       PACKBITS : PackBits 行程压缩（常见 GDI 机型用，作为第一假设）
- *       CAPTURE  : 输出带偏移标记的转储，方便人工比对
- *     协议确认后，把 tsb_page_band() 里的封装换成真实报文即可，接口不变。
+ *   - 报文格式已由驱动实测确认（见 docs/protocol-re.md）：
+ *       UEL + "@PJL\r\n" + N 条 "@PJL SET K=V" + IMAGELEN + JBIG(BIE)
+ *       + DOTCOUNT + PAGESTATUS=END + EOJ + UEL
+ *     其中压缩是 ITU-T T.82 JBIG，用 libjbig 编码，不是私有算法。
+ *   - 模式：
+ *       PJL_JBIG : 真实报文，直接可送打印机（默认）
+ *       RAW      : 只吐 1bpp 原始位图，用于和抓包做逐字节比对
+ *       CAPTURE  : 带绝对偏移的转储，人工比对用
  */
 
 #ifndef TSB_ENC_H
@@ -27,8 +30,9 @@ extern "C" {
 /* 编码模式：逆向前用 RAW/CAPTURE 做比对，逆向完成后切到真实编码 */
 typedef enum {
     TSB_PAYLOAD_RAW      = 0,
-    TSB_PAYLOAD_PACKBITS = 1,
-    TSB_PAYLOAD_CAPTURE  = 2
+    TSB_PAYLOAD_PACKBITS = 1,   /* 已废弃，仅保留枚举值避免破坏旧测试 */
+    TSB_PAYLOAD_CAPTURE  = 2,
+    TSB_PAYLOAD_PJL_JBIG = 3    /* 真实报文（默认） */
 } tsb_payload_mode;
 
 typedef struct {
@@ -42,6 +46,7 @@ typedef struct {
     int  x_dpi;
     int  y_dpi;
     int  copies;          /* 1 表示由 CUPS 复制, >1 表示本 filter 自己循环 */
+    char username[32];    /* 写进 @PJL SET USERNAME=，来自 CUPS argv[2] */
     int  band_height;     /* 分带高度（行），0 表示不分带 */
     tsb_payload_mode mode;
 } tsb_jobopts;

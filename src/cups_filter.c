@@ -202,7 +202,15 @@ int main(int argc, char *argv[])
     o.media_type  = parse_media_type(opts);
     o.toner_save  = opt_is(opts, "TonerSave", "True") ? 1 : 0;
     o.band_height = BAND_LINES;
-    o.mode        = TSB_PAYLOAD_PACKBITS;   /* 逆向完成后改这里；调试可用 TSB_MODE */
+    /* 报文结构已确认（PJL + JBIG），默认走真实输出。
+     * 调试时用 TSB_MODE=raw|capture 切回比对模式。 */
+    o.mode        = TSB_PAYLOAD_PJL_JBIG;
+    if (user) {
+        size_t ul = strlen(user);
+        if (ul >= sizeof o.username) ul = sizeof o.username - 1;
+        memcpy(o.username, user, ul);
+        o.username[ul] = '\0';
+    }
 
     (void)opt_get(opts, "media", o.media, sizeof o.media);
 

@@ -46,7 +46,7 @@ jobs:
                 > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
-                build-essential pkg-config libcups2-dev libcupsimage2-dev file
+                build-essential pkg-config libcups2-dev libcupsimage2-dev libjbig-dev file
               make clean
               make
               make test
@@ -72,7 +72,7 @@ jobs:
                 > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
-                build-essential pkg-config libcups2-dev libcupsimage2-dev debhelper dpkg-dev
+                build-essential pkg-config libcups2-dev libcupsimage2-dev libjbig-dev debhelper dpkg-dev
               # Windows 上提交的仓库可能丢掉 debian/rules 的可执行位，这里兜底
               chmod +x debian/rules
               dpkg-buildpackage -us -uc -b
@@ -96,6 +96,14 @@ jobs:
           set -eu
           bin=rastertotoshiba
           test -x "$bin" || { echo "::error::$bin 不存在，无法做兼容性校验"; exit 1; }
+
+          # 硬门槛：必须真的链接了 libjbig。少了它 filter 能跑但生成不了
+          # 可打印报文（tsb_jbig 退化成空实现），等于装上也打不出纸。
+          if ! readelf --dyn-syms --wide "$bin" | grep -q 'jbg_enc_init'; then
+            echo "::error::$bin 未链接 libjbig（找不到 jbg_enc_init），JBIG 编码不可用"
+            exit 1
+          fi
+          echo "libjbig: linked (jbg_enc_init found)"
 
           # 注意：readelf 抓出来带 "GLIBC_" 前缀，必须先剥掉再比版本，
           # 否则 "GLIBC_2.28" 与 "2.28" 直接比较必然判错。
