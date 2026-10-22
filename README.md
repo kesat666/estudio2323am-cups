@@ -17,6 +17,30 @@
 | Windows 侧 | x64 官方已有，ARM64 无且不可能用 x64 | 兼容列表 32/64 bit；微软 Windows on Arm FAQ 明确要求打印驱动原生 Arm64、安装程序也须 Arm64 |
 | 硬件 ID | `USBPRINT\TOSHIBA_e-STUDIO2323360E` | 驱动信息页；扫描部件 `VID_08a6 PID_8056` |
 | 接口 | USB 2.0 / 10-100 以太网，RAW 9100 | 官方规格 |
+| **双面** | **选配件 MD-0107**，不是标配；A5R–A3，64–80 g/m² | 官方规格页配件清单 `MD-0107 - Automatic Duplex Unit` |
+| **纸盒** | 标配 1×250 张；**选配 PFU MY-1043-B 再加 250**；手送 1×100 张（52–216 g/m²）；最大 600 张 | 官方规格页 `Cassette 1x250 / Bypass 1x100 / Max 600` + 配件清单 `MY-1043-B Paper Feed Unit` |
+| 分辨率 | 原生 600×600 dpi，最高 2400×600（平滑） | 官方规格；filter 固定按 600dpi 取 raster |
+
+注意双面和第二纸盒都是**选配件**。驱动必须让这两项可以关闭、默认关闭，并且在下发前不做能力假设——
+没装双面单元时收到双面命令，设备行为有三种可能（忽略 / 报错 / 退化成单面），必须在抓包里记录（见 `docs/protocol-re.md` 用例 15–18）。
+
+### 1.1 目标系统基线（这一条决定了构建环境）
+
+| 项目 | 银河麒麟 V10 SP1（arm64） | 统信 UOS 20（amd64） |
+|---|---|---|
+| glibc | **2.28** | **2.28** |
+| CUPS | **2.2.10**（SP2 2.3.1 / SP3 2.4.2） | 2.2.x |
+| 包格式 | deb | deb |
+| CPU | 飞腾 / 鲲鹏（arm64） | 海光 / 兆芯（amd64） |
+
+**这带来一个必须遵守的硬约束：二进制不能在 Debian 12（glibc 2.36 / CUPS 2.4）上构建。**
+否则装到目标机上会直接报 `version 'GLIBC_2.34' not found`；更隐蔽的是打包时 `dpkg-shlibdeps`
+会把依赖记成 `libcups2 (>= 2.4.x)`，而麒麟只有 2.2.10，`dpkg -i` 阶段就拒绝安装。
+
+所以 CI 的构建基线固定为 **Debian 10 buster（glibc 2.28 + CUPS 2.2.10）**，与目标机精确对齐。
+CI 里有一步 `Verify glibc and libcups2 baseline` 做硬校验：读二进制引用的最高 `GLIBC_*` 符号版本，
+并解析 deb 的 `Depends`，任何一项超过 2.28 / 2.2.10 就直接失败，不让它进 artifact。
+
 
 ---
 
@@ -164,13 +188,23 @@ GH_TOKEN=ghp_xxx ./tools/publish.sh --token   # HTTPS+PAT，自动建仓并推�
 
 CI 做的事（每一步失败都会红）：
 
-1. `debian:bookworm` 容器内 `make` → 对**真实 CUPS 头文件**编译并链接；
+1. `debian:buster` 容器内 `make` → 对**真实 CUPS 头文件**编译并链接（buster 已 EOL，
+   sources 改指 `archive.debian.org` 并关掉 `Check-Valid-Until`）；
 2. `make test` → 编码器单测；
 3. `chmod +x debian/rules` → 兜底 Windows 提交丢失可执行位的情况；
 4. `dpkg-buildpackage -us -uc -b` → 出 `.deb`；
-5. `dpkg-deb -f` 校验包架构与 matrix 一致。
+5. `dpkg-deb -f` 校验包架构与 matrix 一致；
+6. `Verify glibc and libcups2 baseline` → 读 `readelf` 的最高 `GLIBC_*` 符号版本 + 解析 `Depends`，
+   超过 2.28 / 2.2.10 直接失败（这是麒麟/UOS 能否加载的硬门槛）。
 
-私有仓库同样可用；arm64 走 QEMU，整体约 5–8 分钟。
+为什么是 buster 而不是 bookworm：目标系统是 glibc 2.28 + CUPS 2.2.10，用 bookworm 构建出来的
+二进制会引用 `GLIBC_2.34`、依赖 `libcups2 (>= 2.4)`，在麒麟/UOS 上装都装不上。详见 §1.1。
+
+`debian/compat` 固定为 `11`、`Build-Depends: debhelper (>= 11)`，因为 buster 里的 debhelper 是 12.1.1，
+不提供 `debhelper-compat (= 13)`。兼容级别 11 在 bullseye/bookworm 的 debhelper 13 上同样可用。
+
+arm64 走 QEMU，整体约 6–10 分钟（buster 走 archive 源，apt 阶段比 bookworm 慢）。
+
 
 > 注意：CI 只证明"能编译、能打包"，**不证明能打印**。协议未逆出来之前，产物安装后依然打不出纸。
 
@@ -214,9 +248,19 @@ dpkg-buildpackage -us -uc -a arm64
 
 ---
 
-## 八、下一步需要你定的
+## 八、进度与剩余未知
 
-1. 打印机是否联网？给个 IP，先跑 `tools/probe_printer.py` 排掉"其实支持 IPP/PCL"的可能（5 分钟成本，收益可能是整个项目不用做）。
-2. 能否提供**一份 Windows 驱动打同一页时的网络抓包**（Wireshark `.pcap`）？有它就能直接开始格式分析。
-3. 目标系统：Ubuntu / Debian / 麒麟 / 统信？决定 PPD 路径与包格式。
-4. 是否要复刻双面、纸盒选择、省墨？只做"能打单面 A4"的话，字段可以少逆一半。
+已经确定的（不再是问题）：
+
+- ~~是否支持 IPP/PCL~~ → **已实测确认：都不支持**，私有协议路线确定。
+- ~~目标系统与包格式~~ → **麒麟 V10（arm64）+ 统信 UOS 20（amd64），deb**，基线见 §1.1。
+- ~~双面、纸盒是否要做~~ → **要做**。PPD 已给出 `Duplex` / `InputSlot` / `MediaType` 三组选项，
+  filter 已解析并写入作业头占位字段；硬件前提是选配 MD-0107（双面）与 MY-1043-B（第二纸盒）。
+
+仍然缺的，只有一件事：**抓包**。
+
+1. 打印机 IP。跑 `tools/probe_printer.py` 只为留证（IPP/PCL 已确认不支持，这一步现在可选）。
+2. **一份 Windows 驱动打同一页时的网络抓包**（Wireshark `.pcap`，`tcp.port==9100`）。
+   最低要这四份：全白 A4 单面、全黑 A4 单面、全白 A4 双面、全白 A4 走 Tray2（若装了第二纸盒）。
+3. 有没有 ARM64 真机（麒麟）能用来验证产物。没有的话只能靠 CI 的架构校验 + 你的目标机试装。
+

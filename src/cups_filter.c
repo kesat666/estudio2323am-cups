@@ -6,7 +6,12 @@
  *   2. 交给 tsb_enc 编码；
  *   3. 写到 stdout，由 CUPS 的 socket:// 或 usb:// backend 送到设备。
  *
- * 目标：CUPS 2.4（Debian 12 / Ubuntu 22.04–24.04 / 麒麟 V10 / 统信 UOS）。
+ * 目标：CUPS 2.2 – 2.4。实测目标系统：
+ *   银河麒麟 V10 SP1  → glibc 2.28, CUPS 2.2.10
+ *   统信 UOS 20       → glibc 2.28, CUPS 2.2.x
+ *   Debian 12         → glibc 2.36, CUPS 2.4
+ * 因此二进制必须在 glibc 2.28 基线上构建（见 .github/workflows/build.yml），
+ * 否则在麒麟/UOS 上会报 "version `GLIBC_2.34' not found"。
  * CUPS 3.x 已移除 PPD + filter 模型，需改造成 PAPPL 应用（见 README 第六节）。
  *
  * 编译：  cc -O2 -std=c99 -Wall -Wextra -o rastertotoshiba cups_filter.c tsb_enc.c \
@@ -37,20 +42,62 @@
 
 /*
  * CUPS 会把 PPD 里选中的选项合并进 argv[5]，形如
- *   "media=A4 Resolution=600dpi Duplex=DuplexNoTumble TonerSave=True job-uuid=..."
- * 这里只做最小解析，够用即可；要更严格可换 cupsParseOptions()。
+ *   "media=iso_a4_210x297mm Resolution=600dpi Duplex=DuplexNoTumble
+ *    InputSlot=Tray2 MediaType=Thick job-uuid=..."
+ *
+ * 这里用"按关键字精确取值"而不是 strstr 子串匹配：
+ * strstr("media=") 会误命中 "media-type="，导致取错字段。
  */
-static int opt_has(const char *opts, const char *key, const char *value)
+static int opt_get(const char *opts, const char *key, char *out, size_t cap)
 {
-    char needle[128];
-    snprintf(needle, sizeof needle, "%s=%s", key, value);
-    return strstr(opts, needle) != NULL;
+    size_t klen = strlen(key);
+    const char *p = opts;
+
+    while ((p = strstr(p, key)) != NULL) {
+        int at_start = (p == opts) || (p[-1] == ' ');
+        if (at_start && p[klen] == '=') {
+            const char *v = p + klen + 1;
+            size_t n = strcspn(v, " \t\r\n");
+            if (n >= cap) n = cap - 1;
+            memcpy(out, v, n);
+            out[n] = '\0';
+            return 1;
+        }
+        p += klen;
+    }
+    out[0] = '\0';
+    return 0;
 }
 
+static int opt_is(const char *opts, const char *key, const char *value)
+{
+    char buf[40];
+    return opt_get(opts, key, buf, sizeof buf) && strcmp(buf, value) == 0;
+}
+
+/* 返回 0 单面 / 1 长边 / 2 短边；需要选配双面单元 MD-0107 */
 static int parse_duplex(const char *opts)
 {
-    if (opt_has(opts, "Duplex", "DuplexNoTumble")) return 1;  /* 长边 */
-    if (opt_has(opts, "Duplex", "DuplexTumble"))   return 2;  /* 短边 */
+    if (opt_is(opts, "Duplex", "DuplexNoTumble")) return 1;
+    if (opt_is(opts, "Duplex", "DuplexTumble"))   return 2;
+    return 0;
+}
+
+/* 返回 0 自动 / 1 纸盒1 / 2 纸盒2(选配) / 3 手送 */
+static int parse_input_slot(const char *opts)
+{
+    if (opt_is(opts, "InputSlot", "Tray1"))  return 1;
+    if (opt_is(opts, "InputSlot", "Tray2"))  return 2;
+    if (opt_is(opts, "InputSlot", "Bypass")) return 3;
+    return 0;
+}
+
+/* 返回 0 普通 / 1 厚纸 / 2 薄纸 / 3 再生纸 */
+static int parse_media_type(const char *opts)
+{
+    if (opt_is(opts, "MediaType", "Thick"))    return 1;
+    if (opt_is(opts, "MediaType", "Thin"))     return 2;
+    if (opt_is(opts, "MediaType", "Recycled")) return 3;
     return 0;
 }
 
@@ -139,9 +186,18 @@ int main(int argc, char *argv[])
     memset(&o, 0, sizeof o);
     o.copies      = copies;
     o.duplex      = parse_duplex(opts);
-    o.toner_save  = opt_has(opts, "TonerSave", "True") ? 1 : 0;
+    o.input_slot  = parse_input_slot(opts);
+    o.media_type  = parse_media_type(opts);
+    o.toner_save  = opt_is(opts, "TonerSave", "True") ? 1 : 0;
     o.band_height = BAND_LINES;
     o.mode        = TSB_PAYLOAD_PACKBITS;   /* 逆向完成后改这里；调试可用 TSB_MODE */
+
+    (void)opt_get(opts, "media", o.media, sizeof o.media);
+
+    /* 这几个值直接决定私有报文里的字段，抓包时必须能对上，所以打到 stderr */
+    fprintf(stderr,
+            "DEBUG: opts duplex=%d slot=%d media_type=%d toner_save=%d media=\"%s\"\n",
+            o.duplex, o.input_slot, o.media_type, o.toner_save, o.media);
 
     {
         const char *m = getenv("TSB_MODE");

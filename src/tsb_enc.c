@@ -137,6 +137,36 @@ const tsb_stats *tsb_get_stats(const tsb_ctx *c)
 
 /* ---------------------------------------------------------------- 作业头 */
 
+static const char *slot_name(int slot)
+{
+    switch (slot) {
+    case 1:  return "TRAY1";
+    case 2:  return "TRAY2";
+    case 3:  return "BYPASS";
+    default: return "AUTO";
+    }
+}
+
+static const char *media_type_name(int t)
+{
+    switch (t) {
+    case 1:  return "THICK";
+    case 2:  return "THIN";
+    case 3:  return "RECYCLED";
+    default: return "PLAIN";
+    }
+}
+
+static int wr_line(tsb_ctx *c, const char *fmt, const char *s)
+{
+    char buf[128];
+    int n;
+
+    n = snprintf(buf, sizeof buf, fmt, s);
+    if (n <= 0 || (size_t)n >= sizeof buf) return TSB_ERR;
+    return wr(c, buf, (size_t)n);
+}
+
 int tsb_job_begin(tsb_ctx *c)
 {
     if (!c) return TSB_ERR;
@@ -153,6 +183,20 @@ int tsb_job_begin(tsb_ctx *c)
          * 抓包确认后按实际字节序列填写。下面这段是占位，不是真实协议。 */
         if (wr(c, "\x1b%-12345X", 9) != TSB_OK) return TSB_ERR;
         if (wr(c, "@PJL JOB NAME=\"cups\"\r\n", 24) != TSB_OK) return TSB_ERR;
+        /* [TODO-PROTO] 双面 / 纸盒 / 介质
+         * 这三行是占位，真实关键字必须由 docs/protocol-re.md 的用例 8–14
+         * 抓包确认。写在这里的作用只有一个：抓包时能看出"选了哪个选项，
+         * 报文里多了哪几个字节"，从而反推真实字段位置。 */
+        if (wr_line(c, "@PJL SET DUPLEX=%s\r\n",
+                    c->opt.duplex == 0 ? "OFF" :
+                    (c->opt.duplex == 2 ? "ON/TUMBLE" : "ON")) != TSB_OK)
+            return TSB_ERR;
+        if (wr_line(c, "@PJL SET MEDIASOURCE=%s\r\n",
+                    slot_name(c->opt.input_slot)) != TSB_OK)
+            return TSB_ERR;
+        if (wr_line(c, "@PJL SET MEDIATYPE=%s\r\n",
+                    media_type_name(c->opt.media_type)) != TSB_OK)
+            return TSB_ERR;
         break;
     }
     return TSB_OK;

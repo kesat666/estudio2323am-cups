@@ -44,6 +44,7 @@
 *DefaultPageSize: A4
 *PageSize A4/A4: "<</PageSize[595.28 841.89]/ImagingBBox null>>setpagedevice"
 *PageSize A3/A3: "<</PageSize[841.89 1190.55]/ImagingBBox null>>setpagedevice"
+*PageSize A5/A5: "<</PageSize[419.53 595.28]/ImagingBBox null>>setpagedevice"
 *PageSize Letter/US Letter: "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
 *CloseUI: *PageSize
 
@@ -52,17 +53,20 @@
 *DefaultPageRegion: A4
 *PageRegion A4/A4: "<</PageSize[595.28 841.89]/ImagingBBox null>>setpagedevice"
 *PageRegion A3/A3: "<</PageSize[841.89 1190.55]/ImagingBBox null>>setpagedevice"
+*PageRegion A5/A5: "<</PageSize[419.53 595.28]/ImagingBBox null>>setpagedevice"
 *PageRegion Letter/US Letter: "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
 *CloseUI: *PageRegion
 
 *DefaultImageableArea: A4
 *ImageableArea A4/A4: "18 18 577.28 823.89"
 *ImageableArea A3/A3: "18 18 823.89 1172.55"
+*ImageableArea A5/A5: "18 18 401.53 577.28"
 *ImageableArea Letter/US Letter: "18 18 594 774"
 
 *DefaultPaperDimension: A4
 *PaperDimension A4/A4: "595.28 841.89"
 *PaperDimension A3/A3: "841.89 1190.55"
+*PaperDimension A5/A5: "419.53 595.28"
 *PaperDimension Letter/US Letter: "612 792"
 
 *OpenUI *Resolution/Output Resolution: PickOne
@@ -81,6 +85,33 @@
 *Duplex DuplexNoTumble/Long-Edge Binding: ""
 *Duplex DuplexTumble/Short-Edge Binding: ""
 *CloseUI: *Duplex
+*%
+*% 纸盒：1 号纸盒 250 张（标配）；2 号纸盒需选配 PFU MY-1043-B（250 张，
+*% 装上后整机最大 600 张）；手送 100 张，52–216 g/m²，走厚纸必须用它。
+*% 真实协议里对应哪个字段，由 docs/protocol-re.md 用例 9–12 抓包确认。
+*%
+*OpenUI *InputSlot/Paper Source: PickOne
+*OrderDependency: 25 AnySetup *InputSlot
+*DefaultInputSlot: Auto
+*InputSlot Auto/Auto Select: ""
+*InputSlot Tray1/Tray 1 (250 sheets): ""
+*InputSlot Tray2/Tray 2 (optional): ""
+*InputSlot Bypass/Bypass Tray (100 sheets): ""
+*CloseUI: *InputSlot
+
+*%
+*% 介质类型：手送支持 52–216 g/m²，纸盒仅 64–80 g/m²。
+*% 取值只是 CUPS 侧的名字，真实报文待确认。
+*%
+*OpenUI *MediaType/Media Type: PickOne
+*OrderDependency: 45 AnySetup *MediaType
+*DefaultMediaType: Plain
+*MediaType Plain/Plain Paper: ""
+*MediaType Thick/Thick Paper: ""
+*MediaType Thin/Thin Paper: ""
+*MediaType Recycled/Recycled Paper: ""
+*CloseUI: *MediaType
+
 
 *OpenUI *TonerSave/Toner Save: Boolean
 *OrderDependency: 50 AnySetup *TonerSave

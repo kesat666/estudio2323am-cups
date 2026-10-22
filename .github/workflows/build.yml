@@ -12,7 +12,7 @@ jobs:
   build:
     name: build (${{ matrix.arch }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -28,11 +28,22 @@ jobs:
         with:
           platforms: arm64
 
+      # 基线必须是 Debian 10 buster：glibc 2.28 + CUPS 2.2.10，
+      # 与目标系统完全对齐（麒麟 V10 SP1 / 统信 UOS 20 均为 glibc 2.28）。
+      # 用 buster 而不是 bookworm 的原因：bookworm 的 glibc 2.36 和
+      # libcups2 2.4 会在目标机上导致 "GLIBC_2.34 not found" 和依赖不满足。
       - name: Build and run unit tests
         run: |
           docker run --rm --platform linux/${{ matrix.arch }} \
-            -v "$PWD":/src -w /src debian:bookworm \
+            -v "$PWD":/src -w /src debian:buster \
             bash -euc '
+              . /etc/os-release; echo "base: $PRETTY_NAME"
+              cat > /etc/apt/sources.list <<EOF
+          deb http://archive.debian.org/debian buster main
+          deb http://archive.debian.org/debian-security buster/updates main
+          EOF
+              printf "Acquire::Check-Valid-Until \"false\";\nAcquire::Retries \"3\";\n" \
+                > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
                 build-essential pkg-config libcups2-dev file
@@ -42,14 +53,23 @@ jobs:
               echo "--- artifact ---"
               file rastertotoshiba
               ldd rastertotoshiba
+              echo "--- glibc used ---"
+              readelf --dyn-syms --wide rastertotoshiba \
+                | grep -oE "GLIBC_[0-9]+(\.[0-9]+)*" | sort -Vu | tail -1
             '
 
       - name: Build .deb
         run: |
           mkdir -p out
           docker run --rm --platform linux/${{ matrix.arch }} \
-            -v "$PWD":/src -w /src debian:bookworm \
+            -v "$PWD":/src -w /src debian:buster \
             bash -euc '
+              cat > /etc/apt/sources.list <<EOF
+          deb http://archive.debian.org/debian buster main
+          deb http://archive.debian.org/debian-security buster/updates main
+          EOF
+              printf "Acquire::Check-Valid-Until \"false\";\nAcquire::Retries \"3\";\n" \
+                > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
                 build-essential pkg-config libcups2-dev debhelper dpkg-dev
@@ -67,6 +87,41 @@ jobs:
           arch=$(dpkg-deb -f "$deb" Architecture)
           echo "package: $deb -> $arch"
           test "$arch" = "${{ matrix.arch }}"
+
+      # 目标机兼容性硬门槛：麒麟 V10 SP1 / 统信 UOS 20 都是 glibc 2.28 + CUPS 2.2.10。
+      # 只要这个二进制引用了 2.28 以上的 GLIBC 符号，装到目标机上就是
+      # "version `GLIBC_2.xx' not found"，这里直接拦下来，不让它进 artifact。
+      - name: Verify glibc and libcups2 baseline
+        run: |
+          set -eu
+          bin=rastertotoshiba
+          max=$(readelf --dyn-syms --wide "$bin" \
+                | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sort -Vu | tail -1)
+          echo "max GLIBC symbol: $max"
+          if [ "$(printf '%s\n2.28\n' "$max" | sort -V | tail -1)" != "2.28" ]; then
+            echo "::error::binary needs $max > 2.28; 麒麟 V10 SP1 / UOS 20 会加载失败"
+            exit 1
+          fi
+
+          deb=$(ls out/*.deb | head -1)
+          deps=$(dpkg-deb -f "$deb" Depends)
+          echo "Depends: $deps"
+
+          lc=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libc6 (>= \([^)]*\)).*/\1/p' | head -1)
+          cu=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libcups2 (>= \([^)]*\)).*/\1/p' | head -1)
+          echo "libc6 min: ${lc:-none}  libcups2 min: ${cu:-none}"
+
+          if [ -n "${lc:-}" ] && \
+             [ "$(printf '%s\n2.28\n' "$lc" | sort -V | tail -1)" != "2.28" ]; then
+            echo "::error::Depends 要求 libc6 (>= $lc)，目标机只有 2.28"
+            exit 1
+          fi
+          if [ -n "${cu:-}" ] && \
+             [ "$(printf '%s\n2.2.10\n' "$cu" | sort -V | tail -1)" != "2.2.10" ]; then
+            echo "::error::Depends 要求 libcups2 (>= $cu)，麒麟 V10 只有 2.2.10"
+            exit 1
+          fi
+          echo "baseline OK: 可在麒麟 V10 SP1 / UOS 20 上加载"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

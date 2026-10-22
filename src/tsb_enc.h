@@ -32,8 +32,11 @@ typedef enum {
 } tsb_payload_mode;
 
 typedef struct {
-    int  duplex;          /* 0 单面, 1 双面长边, 2 双面短边 */
+    int  duplex;          /* 0 单面, 1 双面长边, 2 双面短边（需选配 MD-0107） */
     int  toner_save;      /* 省墨 */
+    int  input_slot;      /* 0 自动, 1 纸盒1, 2 纸盒2(选配 MY-1043-B), 3 手送 */
+    int  media_type;      /* 0 普通纸, 1 厚纸, 2 薄纸, 3 再生纸 */
+    char media[40];       /* CUPS media 关键字（如 iso_a4_210x297mm），原样带进报文便于比对 */
     int  media_width_px;  /* 纸张宽度（像素，按 x_dpi 计） */
     int  media_height_px;
     int  x_dpi;
