@@ -95,11 +95,16 @@ jobs:
         run: |
           set -eu
           bin=rastertotoshiba
+          test -x "$bin" || { echo "::error::$bin 不存在，无法做兼容性校验"; exit 1; }
+
+          # 注意：readelf 抓出来带 "GLIBC_" 前缀，必须先剥掉再比版本，
+          # 否则 "GLIBC_2.28" 与 "2.28" 直接比较必然判错。
           max=$(readelf --dyn-syms --wide "$bin" \
-                | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sort -Vu | tail -1)
-          echo "max GLIBC symbol: $max"
-          if [ "$(printf '%s\n2.28\n' "$max" | sort -V | tail -1)" != "2.28" ]; then
-            echo "::error::binary needs $max > 2.28; 麒麟 V10 SP1 / UOS 20 会加载失败"
+                | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' | sed 's/^GLIBC_//' \
+                | sort -Vu | tail -1)
+          echo "max GLIBC symbol: ${max:-none}"
+          if [ -n "${max:-}" ] && dpkg --compare-versions "$max" gt 2.28; then
+            echo "::error::二进制引用 GLIBC_$max，麒麟 V10 SP1 / UOS 20 只有 2.28，会报 version not found"
             exit 1
           fi
 
@@ -107,25 +112,31 @@ jobs:
           deps=$(dpkg-deb -f "$deb" Depends)
           echo "Depends: $deps"
 
-          lc=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libc6 (>= \([^)]*\)).*/\1/p' | head -1)
-          cu=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libcups2 (>= \([^)]*\)).*/\1/p' | head -1)
-          # 剥掉 Debian 修订号（如 2.2.10-6+deb10u1 → 2.2.10）：
-          # 麒麟的 2.2.10-6ky10 在 dpkg 版本序里大于 buster 的 2.2.10-6+deb10u1
-          # （'+' < 'k'），所以只需比较上游版本号，否则会误判成"超过基线"。
-          lc_up=${lc%%-*}
-          cu_up=${cu%%-*}
-          echo "libc6 min: ${lc:-none}  libcups2 min: ${cu:-none}  (upstream: ${lc_up:-none} / ${cu_up:-none})"
+          # 用 dpkg --compare-versions 而不是 sort -V：前者才是 Debian 版本序的权威实现。
+          # 比较前剥掉 Debian 修订号（2.2.10-6+deb10u10 → 2.2.10）：
+          # 麒麟的 2.2.10-6ky10 在 dpkg 序里大于 buster 的 2.2.10-6+deb10u10（'+' < 'k'），
+          # 因此只需保证上游版本号不超过目标系统的。
+          rc=0
+          check_dep() {
+            name=$1; limit=$2
+            v=$(echo "$deps" | tr ',' '\n' | sed -n "s/.*$name (>= \([^)]*\)).*/\1/p" | head -1)
+            if [ -z "${v:-}" ]; then
+              echo "   $name: 无版本约束"
+              return 0
+            fi
+            up=${v%%-*}
+            echo "   $name: >= $v (上游 $up)，目标上限 $limit"
+            if dpkg --compare-versions "$up" gt "$limit"; then
+              echo "::error::$name 要求 >= $v，而目标系统只有 $limit"
+              return 1
+            fi
+            return 0
+          }
+          check_dep libc6 2.28 || rc=1
+          check_dep libcups2 2.2.10 || rc=1
+          check_dep libcupsimage2 2.2.10 || rc=1
+          [ "$rc" -eq 0 ] || exit 1
 
-          if [ -n "${lc_up:-}" ] && \
-             [ "$(printf '%s\n2.28\n' "$lc_up" | sort -V | tail -1)" != "2.28" ]; then
-            echo "::error::Depends 要求 libc6 (>= $lc)，目标机只有 2.28"
-            exit 1
-          fi
-          if [ -n "${cu_up:-}" ] && \
-             [ "$(printf '%s\n2.2.10\n' "$cu_up" | sort -V | tail -1)" != "2.2.10" ]; then
-            echo "::error::Depends 要求 libcups2 (>= $cu)，麒麟 V10 只有 2.2.10"
-            exit 1
-          fi
           echo "baseline OK: 可在麒麟 V10 SP1 / UOS 20 上加载"
 
       - name: Upload artifacts
