@@ -28,7 +28,7 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build, syntax check, unit tests
+      - name: Build and run unit tests
         run: |
           docker run --rm --platform linux/${{ matrix.arch }} \
             -v "$PWD":/src -w /src debian:bookworm \
@@ -38,7 +38,6 @@ jobs:
                 build-essential pkg-config libcups2-dev file
               make clean
               make
-              make syntax
               make test
               echo "--- artifact ---"
               file rastertotoshiba

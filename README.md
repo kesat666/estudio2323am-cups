@@ -144,6 +144,32 @@ e-STUDIO 2323AM 固件解析 → 成像
 
 > 本机没有 Linux 环境（WSL 未启用且被安全策略拦截）。三条路的详细步骤见 **`docs/build-env.md`**；CI 已配好，推到 GitHub 即自动产出 amd64 / arm64 两个 `.deb`。
 
+### 已采用：GitHub Actions（无需本机 Linux）
+
+仓库已初始化并完成首次提交（`debian/rules` 的可执行位已写入 git index，换行统一为 LF）。推上去即可：
+
+```bash
+git remote add origin git@github.com:<你的账号>/<仓库名>.git
+git push -u origin master      # 或 main，视你的默认分支
+```
+
+然后在 Actions 页面看 `build (amd64)` 与 `build (arm64)` 两个 job，跑完在 job 页面底部下载 artifact：
+
+- `toshiba-estudio2323am-amd64` → `toshiba-estudio2323am_0.0.1_amd64.deb`
+- `toshiba-estudio2323am-arm64` → `toshiba-estudio2323am_0.0.1_arm64.deb`
+
+CI 做的事（每一步失败都会红）：
+
+1. `debian:bookworm` 容器内 `make` → 对**真实 CUPS 头文件**编译并链接；
+2. `make test` → 编码器单测；
+3. `chmod +x debian/rules` → 兜底 Windows 提交丢失可执行位的情况；
+4. `dpkg-buildpackage -us -uc -b` → 出 `.deb`；
+5. `dpkg-deb -f` 校验包架构与 matrix 一致。
+
+私有仓库同样可用；arm64 走 QEMU，整体约 5–8 分钟。
+
+> 注意：CI 只证明"能编译、能打包"，**不证明能打印**。协议未逆出来之前，产物安装后依然打不出纸。
+
 ### 本地（在 Linux 上）
 ```bash
 sudo apt install build-essential libcups2-dev
