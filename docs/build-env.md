@@ -16,12 +16,21 @@
 
 ---
 
-## 路线 A：GitHub Actions（零本地改动，推荐）
+## 路线 A：GitHub Actions（已采用）
 
-`.github/workflows/build.yml` 已经写好：push 到 GitHub 后自动在 `ubuntu-22.04` 上用 QEMU 跑 amd64 与 arm64 两个架构，执行 `make && make syntax && make test && dpkg-buildpackage`，产物作为 artifact 上传。
+`.github/workflows/build.yml` 已就绪，本地仓库也已完成初始化与提交。你在 GitHub 上建好空仓库后：
 
-优点：不动本机、两个架构都真跑一遍、版本可追溯。
-缺点：需要把代码推到 GitHub（私有仓库同样可用，Actions 免费额度够）。
+```bash
+git remote add origin git@github.com:<账号>/<仓库名>.git
+git push -u origin master
+```
+
+即可在 Actions 页面看到 `build (amd64)` 与 `build (arm64)` 两个 job 并行，产物是 `.deb` 形式的 artifact。
+
+优点：不动本机、两个架构都真跑一遍（不是交叉编译的假设）、版本可追溯。
+缺点：需要把代码推到 GitHub（私有仓库同样可用，免费额度够）。
+
+下面两条路线保留作备选。
 
 本地等价的一条命令（有 Docker 即可，不需要 WSL）：
 
