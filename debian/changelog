@@ -1,11 +1,26 @@
-toshiba-estudio2323am (0.0.1) unstable; urgency=low
+toshiba-estudio2323am (0.1.0) unstable; urgency=low
 
-  * Initial packaging skeleton.
-  * Encoder core (tsb_enc) with PackBits reference implementation and
-    raw/capture dump modes for protocol comparison against wire captures.
-  * CUPS filter shell (rastertotoshiba) accepting application/vnd.cups-raster
-    at 1bpp or 8bpp, buffering one page for multi-copy support.
-  * NOTE: the private device payload is not yet confirmed. The filter cannot
-    produce a printable stream until docs/protocol-re.md is completed.
+  * First functionally complete release: the filter now emits a real device
+    stream instead of a placeholder.
 
- -- kesat666 <keast606@gmail.com>  Thu, 22 Oct 2026 21:30:00 +0800
+  * Protocol reversed from Windows driver captures: the 2323AM/2823AM accepts
+    a standard PJL wrapper (UEL ... @PJL SET x20 ... @PJL EOJ ... UEL) carrying
+    a standard ITU-T T.82 JBIG bitstream. No vendor-proprietary compression.
+  * JBIG encoding via libjbig with jbg_enc_options(order=0, l0=128, mx=840,
+    my=255), which reproduces the vendor BIE header byte for byte.
+  * Duplex emitted as two independent fields: DUPLEX=ON|OFF plus
+    BINDING=LONGEDGE|SHORTEDGE.
+  * Whole-page buffering, required because IMAGELEN precedes the payload.
+  * InputSlot and MediaType dropped from the PPD: the 2323AM has a single
+    fixed tray and no media-type selection, so the options were dead weight.
+  * PPD media sizes aligned across all four tables; A5 added.
+
+  * Round-trip verified offline: vendor payload decodes to the expected
+    4961x7016 bitmap, and our encoder output re-decodes to an identical image.
+  * Package built against Debian 10 (glibc 2.28, CUPS 2.2.10) to match
+    Kylin V10 SP1 (arm64) and UOS 20 (amd64).
+
+  * Not yet validated on real hardware: acceptance of the jbigkit BIE header,
+    EOJ placement in multi-page jobs, and BINDING on duplex jobs.
+
+ -- kesat666 <keast606@gmail.com>  Fri, 23 Oct 2026 00:20:00 +0800

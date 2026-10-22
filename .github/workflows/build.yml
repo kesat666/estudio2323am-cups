@@ -153,3 +153,36 @@ jobs:
           name: toshiba-estudio2323am-${{ matrix.arch }}
           path: out/*.deb
           if-no-files-found: error
+
+  # 打 tag（v*）时把两个架构的 .deb 挂到 GitHub Release 上。
+  # 之所以要 Release 而不只留 artifact：artifact 下载强制要求登录 token，
+  # Release 附件是公开直链，目标机（麒麟/统信）上直接 curl 就能拿。
+  release:
+    name: publish release
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Collect .deb packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          set -eu
+          ls -l dist/
+          cd dist && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
