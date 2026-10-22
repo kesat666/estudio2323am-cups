@@ -46,7 +46,7 @@ jobs:
                 > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
-                build-essential pkg-config libcups2-dev file
+                build-essential pkg-config libcups2-dev libcupsimage2-dev file
               make clean
               make
               make test
@@ -72,7 +72,7 @@ jobs:
                 > /etc/apt/apt.conf.d/99archive
               apt-get update
               apt-get install -y --no-install-recommends \
-                build-essential pkg-config libcups2-dev debhelper dpkg-dev
+                build-essential pkg-config libcups2-dev libcupsimage2-dev debhelper dpkg-dev
               # Windows 上提交的仓库可能丢掉 debian/rules 的可执行位，这里兜底
               chmod +x debian/rules
               dpkg-buildpackage -us -uc -b
@@ -109,15 +109,20 @@ jobs:
 
           lc=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libc6 (>= \([^)]*\)).*/\1/p' | head -1)
           cu=$(echo "$deps" | tr ',' '\n' | sed -n 's/.*libcups2 (>= \([^)]*\)).*/\1/p' | head -1)
-          echo "libc6 min: ${lc:-none}  libcups2 min: ${cu:-none}"
+          # 剥掉 Debian 修订号（如 2.2.10-6+deb10u1 → 2.2.10）：
+          # 麒麟的 2.2.10-6ky10 在 dpkg 版本序里大于 buster 的 2.2.10-6+deb10u1
+          # （'+' < 'k'），所以只需比较上游版本号，否则会误判成"超过基线"。
+          lc_up=${lc%%-*}
+          cu_up=${cu%%-*}
+          echo "libc6 min: ${lc:-none}  libcups2 min: ${cu:-none}  (upstream: ${lc_up:-none} / ${cu_up:-none})"
 
-          if [ -n "${lc:-}" ] && \
-             [ "$(printf '%s\n2.28\n' "$lc" | sort -V | tail -1)" != "2.28" ]; then
+          if [ -n "${lc_up:-}" ] && \
+             [ "$(printf '%s\n2.28\n' "$lc_up" | sort -V | tail -1)" != "2.28" ]; then
             echo "::error::Depends 要求 libc6 (>= $lc)，目标机只有 2.28"
             exit 1
           fi
-          if [ -n "${cu:-}" ] && \
-             [ "$(printf '%s\n2.2.10\n' "$cu" | sort -V | tail -1)" != "2.2.10" ]; then
+          if [ -n "${cu_up:-}" ] && \
+             [ "$(printf '%s\n2.2.10\n' "$cu_up" | sort -V | tail -1)" != "2.2.10" ]; then
             echo "::error::Depends 要求 libcups2 (>= $cu)，麒麟 V10 只有 2.2.10"
             exit 1
           fi

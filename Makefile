@@ -26,6 +26,20 @@ ifeq ($(strip $(CUPS_LIBS)),)
 CUPS_LIBS   := -lcups
 endif
 
+# raster API（cupsRasterOpen/ReadHeader/ReadPixels）的归属随 CUPS 版本变化：
+#   CUPS 2.2 / 2.3  → 在 libcupsimage 里（麒麟 V10 2.2.10、统信 UOS 2.2.x 属于这类）
+#   CUPS 2.4 及以后 → 已合并进 libcups，libcupsimage 被删除
+# 所以这里做动态探测：先问 pkg-config，再直接问编译器库搜索路径，
+# 找不到就不加 -lcupsimage（否则在 CUPS 2.4 系统上会因找不到库而链接失败）。
+CUPS_IMAGE_LIBS := $(shell $(PKG_CONFIG) --libs cupsimage 2>/dev/null)
+ifeq ($(strip $(CUPS_IMAGE_LIBS)),)
+# 注意：这里的命令不能出现 ')'，否则会提前闭合 $(shell ...)
+CUPS_IMAGE_LIBS := $(shell lib=$$($(CC) -print-file-name=libcupsimage.so); test -f "$$lib" && echo -lcupsimage)
+endif
+
+# 链接顺序要求：cupsimage 依赖 cups 的符号，必须排在前面
+CUPS_LINK_LIBS := $(strip $(CUPS_IMAGE_LIBS) $(CUPS_LIBS))
+
 CFLAGS      ?= -O2
 CFLAGS      += -std=c99 -Wall -Wextra -D_POSIX_C_SOURCE=200809L
 LDFLAGS     ?=
@@ -41,7 +55,7 @@ TEST_SRC    := src/test_enc.c $(SRC)
 all: $(BIN)
 
 $(BIN): $(FILTER_SRC) src/tsb_enc.h
-	$(CC) $(CFLAGS) $(CUPS_CFLAGS) -o $@ $(FILTER_SRC) $(CUPS_LIBS) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CUPS_CFLAGS) -o $@ $(FILTER_SRC) $(CUPS_LINK_LIBS) $(LDFLAGS)
 
 $(TESTBIN): $(TEST_SRC) src/tsb_enc.h
 	$(CC) $(CFLAGS) -o $@ $(TEST_SRC) $(LDFLAGS)

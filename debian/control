@@ -2,7 +2,7 @@ Source: toshiba-estudio2323am
 Section: text
 Priority: optional
 Maintainer: kesat666 <keast606@gmail.com>
-Build-Depends: debhelper (>= 11), libcups2-dev, pkg-config
+Build-Depends: debhelper (>= 11), libcups2-dev, libcupsimage2-dev, pkg-config
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 Homepage: https://github.com/kesat666/estudio2323am-cups

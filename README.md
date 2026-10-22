@@ -203,6 +203,18 @@ CI 做的事（每一步失败都会红）：
 `debian/compat` 固定为 `11`、`Build-Depends: debhelper (>= 11)`，因为 buster 里的 debhelper 是 12.1.1，
 不提供 `debhelper-compat (= 13)`。兼容级别 11 在 bullseye/bookworm 的 debhelper 13 上同样可用。
 
+**另一个只在 2.2 上才暴露的坑**：`cupsRasterOpen` / `cupsRasterReadHeader2` / `cupsRasterReadPixels`
+在 **CUPS 2.2 / 2.3 里属于 `libcupsimage`**，直到 **CUPS 2.4 才合并进 `libcups`**（libcupsimage 被删除）。
+所以用 bookworm 构建时 `-lcups` 就能过，切到 buster 立刻报一串 `undefined reference to 'cupsRasterOpen'`。
+Makefile 现在做动态探测，两个分支都验证过：
+
+```
+有 libcupsimage → cc ... -lcupsimage -lcups     (麒麟 V10 / UOS 20 走这条)
+无 libcupsimage → cc ... -lcups                 (CUPS 2.4+ 走这条)
+```
+
+探测不能用 `case ... in /*)` 这种写法——里面的 `)` 会提前闭合 `$(shell ...)`，这是个很容易踩的 GNU make 陷阱。
+
 arm64 走 QEMU，整体约 6–10 分钟（buster 走 archive 源，apt 阶段比 bookworm 慢）。
 
 
