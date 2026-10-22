@@ -146,12 +146,15 @@ e-STUDIO 2323AM 固件解析 → 成像
 
 ### 已采用：GitHub Actions（无需本机 Linux）
 
-仓库已初始化并完成首次提交（`debian/rules` 的可执行位已写入 git index，换行统一为 LF）。推上去即可：
+仓库已初始化并完成提交，作者为 `keast666 <keast606@gmail.com>`（`debian/rules` 的可执行位已写入 git index，换行统一为 LF）。发布用 `tools/publish.sh`，它会先体检再推：
 
 ```bash
-git remote add origin git@github.com:<你的账号>/<仓库名>.git
-git push -u origin master      # 或 main，视你的默认分支
+./tools/publish.sh --check     # 只体检：账号是否存在、仓库是否已建、SSH 是否就绪
+./tools/publish.sh --ssh       # SSH 方式（先把 ~/.ssh/id_ed25519.pub 加到 GitHub）
+GH_TOKEN=ghp_xxx ./tools/publish.sh --token   # HTTPS+PAT，自动建仓并推送
 ```
+
+账号或仓库名不同时用环境变量覆盖：`GH_USER=xxx GH_REPO=yyy ./tools/publish.sh --ssh`。
 
 然后在 Actions 页面看 `build (amd64)` 与 `build (arm64)` 两个 job，跑完在 job 页面底部下载 artifact：
 
