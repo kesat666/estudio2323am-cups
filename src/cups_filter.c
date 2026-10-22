@@ -42,8 +42,8 @@
 
 /*
  * CUPS 会把 PPD 里选中的选项合并进 argv[5]，形如
- *   "media=iso_a4_210x297mm Resolution=600dpi Duplex=DuplexNoTumble
- *    InputSlot=Tray2 MediaType=Thick job-uuid=..."
+ *   "media=iso_a4_210x297mm Resolution=600dpi Duplex=DuplexNoTumble job-uuid=..."
+ * （PPD 未暴露 InputSlot/MediaType，那两项改由环境变量注入，见下方说明）
  *
  * 这里用"按关键字精确取值"而不是 strstr 子串匹配：
  * strstr("media=") 会误命中 "media-type="，导致取错字段。
@@ -83,21 +83,33 @@ static int parse_duplex(const char *opts)
     return 0;
 }
 
-/* 返回 0 自动 / 1 纸盒1 / 2 纸盒2(选配) / 3 手送 */
+/*
+ * 纸盒与介质类型不走 PPD（本机无第二纸盒，PPD 也不暴露这两个选项）。
+ * 它们只作为逆向差分实验的强制开关存在：TSB_SLOT=tray1|bypass|auto，
+ * TSB_MEDIATYPE=plain|thick|thin|recycled。
+ * 这样抓包时可以在同一份文档上单独改一个变量，不必反复改代码重编。
+ */
 static int parse_input_slot(const char *opts)
 {
-    if (opt_is(opts, "InputSlot", "Tray1"))  return 1;
-    if (opt_is(opts, "InputSlot", "Tray2"))  return 2;
-    if (opt_is(opts, "InputSlot", "Bypass")) return 3;
+    const char *e = getenv("TSB_SLOT");
+
+    (void)opts;                 /* 保留签名，协议确认后可改回读 PPD 选项 */
+    if (!e || !*e) return 0;
+    if (strcmp(e, "tray1") == 0)  return 1;
+    if (strcmp(e, "tray2") == 0)  return 2;
+    if (strcmp(e, "bypass") == 0) return 3;
     return 0;
 }
 
-/* 返回 0 普通 / 1 厚纸 / 2 薄纸 / 3 再生纸 */
 static int parse_media_type(const char *opts)
 {
-    if (opt_is(opts, "MediaType", "Thick"))    return 1;
-    if (opt_is(opts, "MediaType", "Thin"))     return 2;
-    if (opt_is(opts, "MediaType", "Recycled")) return 3;
+    const char *e = getenv("TSB_MEDIATYPE");
+
+    (void)opts;
+    if (!e || !*e) return 0;
+    if (strcmp(e, "thick") == 0)    return 1;
+    if (strcmp(e, "thin") == 0)     return 2;
+    if (strcmp(e, "recycled") == 0) return 3;
     return 0;
 }
 

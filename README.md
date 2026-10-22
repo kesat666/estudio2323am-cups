@@ -17,12 +17,16 @@
 | Windows 侧 | x64 官方已有，ARM64 无且不可能用 x64 | 兼容列表 32/64 bit；微软 Windows on Arm FAQ 明确要求打印驱动原生 Arm64、安装程序也须 Arm64 |
 | 硬件 ID | `USBPRINT\TOSHIBA_e-STUDIO2323360E` | 驱动信息页；扫描部件 `VID_08a6 PID_8056` |
 | 接口 | USB 2.0 / 10-100 以太网，RAW 9100 | 官方规格 |
-| **双面** | **选配件 MD-0107**，不是标配；A5R–A3，64–80 g/m² | 官方规格页配件清单 `MD-0107 - Automatic Duplex Unit` |
-| **纸盒** | 标配 1×250 张；**选配 PFU MY-1043-B 再加 250**；手送 1×100 张（52–216 g/m²）；最大 600 张 | 官方规格页 `Cassette 1x250 / Bypass 1x100 / Max 600` + 配件清单 `MY-1043-B Paper Feed Unit` |
+| **双面** | 选配件 MD-0107；**现场已确认加装，属必支持功能**；A5R–A3，64–80 g/m² | 官方规格页 `MD-0107 - Automatic Duplex Unit` + 现场确认 |
+| **纸盒** | 标配 1×250 张 + 手送 1×100 张（52–216 g/m²）；**现场未加装 PFU MY-1043-B** | 官方规格页 `Cassette 1x250 / Bypass 1x100 / Max 600` + 现场确认 |
 | 分辨率 | 原生 600×600 dpi，最高 2400×600（平滑） | 官方规格；filter 固定按 600dpi 取 raster |
 
-注意双面和第二纸盒都是**选配件**。驱动必须让这两项可以关闭、默认关闭，并且在下发前不做能力假设——
-没装双面单元时收到双面命令，设备行为有三种可能（忽略 / 报错 / 退化成单面），必须在抓包里记录（见 `docs/protocol-re.md` 用例 15–18）。
+**现场结论（已确认，据此收敛设计）**：双面可用 → 必须支持；无第二纸盒、且用户侧不需要纸盒选择
+→ PPD **不暴露** `InputSlot` / `MediaType`，这两类字段只保留为逆向实验用的环境变量
+（`TSB_SLOT` / `TSB_MEDIATYPE`）。原因是协议未定时每多一个选项就多一组待填的表，
+而这两项在本机没有实际使用场景。
+
+双面仍**默认关闭**：协议未定时宁可打单面，也不要错送双面指令导致卡纸。
 
 ### 1.1 目标系统基线（这一条决定了构建环境）
 
@@ -142,11 +146,14 @@ e-STUDIO 2323AM 固件解析 → 成像
 │   └── toshiba-estudio2323am.ppd.in   PPD 模板（协议未定时不可用，见文件头注释）
 ├── debian/                   .deb 打包（Architecture: amd64 arm64）
 ├── docs/
+│   ├── capture-guide.md      **接网 + 抓取作业流**（先读这个）
 │   ├── protocol-re.md        逆向操作手册（用例矩阵、字段记录表、进度清单）
 │   └── build-env.md          Linux 构建环境（WSL / Docker / CI 三条路）
 ├── .github/workflows/build.yml   CI：amd64 + arm64 自动构建与打包
 └── tools/
     ├── probe_printer.py      Step 0：先确认是否真的只有私有协议
+    ├── port9100_proxy.py     Step 1：9100 代理，截获驱动吐出的原始作业流
+    ├── selftest_proxy.py     代理的离线自测（假打印机 + 字节级比对）
     └── analyze_stream.py     抓包分析：--stats / --entropy / --diff / --hexdump
 ```
 
@@ -266,13 +273,25 @@ dpkg-buildpackage -us -uc -a arm64
 
 - ~~是否支持 IPP/PCL~~ → **已实测确认：都不支持**，私有协议路线确定。
 - ~~目标系统与包格式~~ → **麒麟 V10（arm64）+ 统信 UOS 20（amd64），deb**，基线见 §1.1。
-- ~~双面、纸盒是否要做~~ → **要做**。PPD 已给出 `Duplex` / `InputSlot` / `MediaType` 三组选项，
-  filter 已解析并写入作业头占位字段；硬件前提是选配 MD-0107（双面）与 MY-1043-B（第二纸盒）。
+- ~~双面是否要做~~ → **本机已装 MD-0107，双面必做**。PPD 保留 `Duplex`，但**默认单面**，
+  协议确认前不下发双面指令。
+- ~~纸盒选择是否要做~~ → **不做**。无第二纸盒、用户侧无需求，PPD 已移除 `InputSlot` / `MediaType`，
+  仅保留环境变量 `TSB_SLOT` / `TSB_MEDIATYPE` 供逆向差分实验。
 
-仍然缺的，只有一件事：**抓包**。
+仍然缺的，只有**驱动吐出的那串字节**。取法见 `docs/capture-guide.md`，按省力程度排序：
 
-1. 打印机 IP。跑 `tools/probe_printer.py` 只为留证（IPP/PCL 已确认不支持，这一步现在可选）。
-2. **一份 Windows 驱动打同一页时的网络抓包**（Wireshark `.pcap`，`tcp.port==9100`）。
-   最低要这四份：全白 A4 单面、全黑 A4 单面、全白 A4 双面、全白 A4 走 Tray2（若装了第二纸盒）。
-3. 有没有 ARM64 真机（麒麟）能用来验证产物。没有的话只能靠 CI 的架构校验 + 你的目标机试装。
+1. **打印到文件**（首选）：给队列建一个 `FILE:` 或 `Local Port` 指向文件的端口，打印即得 `.prn`。
+   不用抓包、不用接线，最干净。
+2. **9100 代理**：`python tools/port9100_proxy.py --target <打印机IP> --label white`，
+   把队列端口指向 `127.0.0.1:19100`。能同时抓到 PJL 状态回读（字段线索）。
+3. **Wireshark**：前两条都不行时才用。
 
+最低六份：`white` / `black` / `checker` / `single` / `text` / `duplex`（清单与驱动设置见
+`capture-guide.md` 第四节）。抓完先跑这两条命令，第一个数字决定后面两周的工作量：
+
+```bash
+python tools/analyze_stream.py --stats captures/white.bin --page a4-600
+python tools/analyze_stream.py --diff  captures/text.bin captures/duplex.bin
+```
+
+另外还缺一条信息：**有没有 ARM64 真机（麒麟）能验证产物**。没有的话只能靠 CI 的架构校验 + 目标机试装。

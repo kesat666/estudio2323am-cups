@@ -17,9 +17,14 @@ debian/toshiba-estudio2323am/
 *.pcap
 *.pcapng
 *.bin
+/captures/
+*.prn
 
 # 会话工作数据，不进版本库
 .workbuddy/
+
+__pycache__/
+*.pyc
 
 # 编辑器
 .vscode/

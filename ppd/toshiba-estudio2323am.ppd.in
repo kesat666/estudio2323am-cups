@@ -76,7 +76,9 @@
 *CloseUI: *Resolution
 
 *%
-*% 双面：字段真实含义待抓包确认（README 4.2 的 duplex 用例）
+*% 双面：本机已加装自动双面单元 MD-0107，属必支持功能（不是可选装饰）。
+*% 但报文里 duplex 字段的位置/取值仍待抓包确认，见 docs/protocol-re.md 用例 9/10。
+*% 默认仍是单面：协议未定时宁可打单面，也不要错送双面指令导致卡纸。
 *%
 *OpenUI *Duplex/2-Sided Printing: PickOne
 *OrderDependency: 50 AnySetup *Duplex
@@ -86,31 +88,12 @@
 *Duplex DuplexTumble/Short-Edge Binding: ""
 *CloseUI: *Duplex
 *%
-*% 纸盒：1 号纸盒 250 张（标配）；2 号纸盒需选配 PFU MY-1043-B（250 张，
-*% 装上后整机最大 600 张）；手送 100 张，52–216 g/m²，走厚纸必须用它。
-*% 真实协议里对应哪个字段，由 docs/protocol-re.md 用例 9–12 抓包确认。
+*% 刻意不提供纸盒选择（InputSlot）与介质类型（MediaType）：
+*%   - 本机只有标配 250 张纸盒 + 100 张手送，没有加装 MY-1043-B 第二纸盒；
+*%   - 这两类字段在私有报文里的位置尚未确认，暴露选项只会扩大逆向面。
+*% 逆向需要强制指定时，用环境变量 TSB_SLOT / TSB_MEDIATYPE（见 src/cups_filter.c），
+*% 不经过 PPD，不影响用户侧界面。协议确认后再决定是否加回 PPD。
 *%
-*OpenUI *InputSlot/Paper Source: PickOne
-*OrderDependency: 25 AnySetup *InputSlot
-*DefaultInputSlot: Auto
-*InputSlot Auto/Auto Select: ""
-*InputSlot Tray1/Tray 1 (250 sheets): ""
-*InputSlot Tray2/Tray 2 (optional): ""
-*InputSlot Bypass/Bypass Tray (100 sheets): ""
-*CloseUI: *InputSlot
-
-*%
-*% 介质类型：手送支持 52–216 g/m²，纸盒仅 64–80 g/m²。
-*% 取值只是 CUPS 侧的名字，真实报文待确认。
-*%
-*OpenUI *MediaType/Media Type: PickOne
-*OrderDependency: 45 AnySetup *MediaType
-*DefaultMediaType: Plain
-*MediaType Plain/Plain Paper: ""
-*MediaType Thick/Thick Paper: ""
-*MediaType Thin/Thin Paper: ""
-*MediaType Recycled/Recycled Paper: ""
-*CloseUI: *MediaType
 
 
 *OpenUI *TonerSave/Toner Save: Boolean
