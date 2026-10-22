@@ -180,7 +180,7 @@ e-STUDIO 2323AM 固件解析 → 成像
 
 ### 已采用：GitHub Actions（无需本机 Linux）
 
-仓库已发布：**<https://github.com/kesat666/estudio2323am-cups>**（私有仓库），主分支 `main`。
+仓库已发布：**<https://github.com/kesat666/estudio2323am-cups>**（公开仓库），主分支 `main`。
 作者 `kesat666 <keast606@gmail.com>`；`debian/rules` 的可执行位已写入 git index，换行统一为 LF。后续发布用 `tools/publish.sh`：
 
 ```bash
@@ -191,10 +191,23 @@ GH_TOKEN=ghp_xxx ./tools/publish.sh --token   # HTTPS+PAT，自动建仓并推�
 
 账号或仓库名不同时用环境变量覆盖：`GH_USER=xxx GH_REPO=yyy ./tools/publish.sh --ssh`。
 
-然后在 Actions 页面看 `build (amd64)` 与 `build (arm64)` 两个 job，跑完在 job 页面底部下载 artifact：
+然后在 Actions 页面看 `build (amd64)` 与 `build (arm64)` 两个 job，跑完在 job 页面底部下载 artifact。
 
-- `toshiba-estudio2323am-amd64` → `toshiba-estudio2323am_0.0.1_amd64.deb`
-- `toshiba-estudio2323am-arm64` → `toshiba-estudio2323am_0.0.1_arm64.deb`
+不过 **artifact 下载强制要求登录 GitHub**，目标机（麒麟/统信）上不方便。所以打 `v*` 标签时 workflow 会额外跑一个
+`publish release` job，把两个 `.deb` 连同 `SHA256SUMS` 挂到 Release，直链公开可下：
+
+```bash
+# 麒麟 V10 SP1 (arm64)
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.0/toshiba-estudio2323am_0.1.0_arm64.deb
+
+# 统信 UOS 20 (amd64)
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.0/toshiba-estudio2323am_0.1.0_amd64.deb
+
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.0/SHA256SUMS
+sha256sum -c SHA256SUMS
+```
+
+发版流程：`git tag -a v0.1.0 -m "..." && git push origin v0.1.0`。
 
 CI 做的事（每一步失败都会红）：
 
@@ -205,7 +218,8 @@ CI 做的事（每一步失败都会红）：
 4. `dpkg-buildpackage -us -uc -b` → 出 `.deb`；
 5. `dpkg-deb -f` 校验包架构与 matrix 一致；
 6. `Verify glibc and libcups2 baseline` → 读 `readelf` 的最高 `GLIBC_*` 符号版本 + 解析 `Depends`，
-   超过 2.28 / 2.2.10 直接失败（这是麒麟/UOS 能否加载的硬门槛）。
+   超过 2.28 / 2.2.10 直接失败（这是麒麟/UOS 能否加载的硬门槛）；
+7. 打 tag 时额外的 `publish release` job → 汇总两个 `.deb` + `SHA256SUMS` 建 Release。
 
 为什么是 buster 而不是 bookworm：目标系统是 glibc 2.28 + CUPS 2.2.10，用 bookworm 构建出来的
 二进制会引用 `GLIBC_2.34`、依赖 `libcups2 (>= 2.4)`，在麒麟/UOS 上装都装不上。详见 §1.1。

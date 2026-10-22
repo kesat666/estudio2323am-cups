@@ -1,22 +1,21 @@
 *PPD-Adobe: "4.3"
 *%
 *% ==========================================================================
-*%  e-STUDIO 2323AM / 2823AM  —  CUPS PPD 模板
+*%  e-STUDIO 2323AM / 2823AM  —  CUPS PPD
 *%
-*%  ⚠ 状态：模板。在 docs/protocol-re.md 完成、tsb_enc 的 [TODO-PROTO]
-*%    全部替换为真实报文之前，装了这个 PPD 也打不出东西（会送出无效字节流）。
+*%  本机型是 GDI（主机渲染）设备，没有 PCL/PS 解释器，所以页面必须在主机侧
+*%  栅格化，由 rastertotoshiba 编码成厂商报文再交给 backend
+*%  （socket:// 或 usb://）。
 *%
 *%  这是 CUPS 2.x 的经典 PPD + filter 模型。CUPS 3.x 已弃用此模型。
 *%
-*%  安装：
-*%    sudo install -m 644 toshiba-estudio2323am.ppd \
-*%         /usr/share/cups/model/toshiba-estudio2323am.ppd
-*%    sudo systemctl restart cups
+*%  正常安装走 deb 包，不需要手工拷贝：
+*%    sudo dpkg -i toshiba-estudio2323am_<ver>_<arch>.deb
 *%    lpadmin -p 2323am -E -v socket://192.168.1.50:9100 \
 *%            -m toshiba-estudio2323am.ppd
 *% ==========================================================================
 *FormatVersion: "4.3"
-*FileVersion: "0.0.1"
+*FileVersion: "0.1.0"
 *LanguageVersion: English
 *LanguageEncoding: ISOLatin1
 *PCFileName: "TSB2323A.PPD"
