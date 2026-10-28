@@ -275,3 +275,40 @@ sudo python3 tools/pjlq.py "@PJL INFO ID" "@PJL INFO VARIABLES"
 5. 连续两页 → 页序正确、不叠印 = EOJ 位置正确
 
 任何一步不对，把现象告诉我，对照 §5 的怀疑点逐个排。
+
+## 8. 纸盒与双面：定案（0.1.6 起）
+
+### 8.1 三个进纸口只有两个 token
+`@PJL SET MEDIASOURCE` 的取值在 `eSSh6OCM.dll` 里是**硬编码串**，不是拼出来的：
+
+```
+@PJL SET MEDIASOURCE=MANUALFEED     ← 旁路的专用硬编码
+@PJL SET MEDIASOURCE=%s             ← 通用模板，%s 来自 eSSh6CFG.xml
+```
+
+`eSSh6CFG.xml` 的托盘表映射：自动 → `AUTO`、纸盒 1 → `TRAY1`、
+纸盒 2 → `TRAY2`、旁路托盘 → `MANUALFEED`（不是常见的 `BYPASS` / `MPT`）。
+
+Windows 端交叉验证：用 `DeviceCapabilitiesW(DC_BINS/DC_BINNAMES)` 枚举出
+`263=自动 258=旁路托盘 260=纸盒 1 257=纸盒 2`，把 DEVMODE 的 `dmDefaultSource`
+设成 258，经本地文件端口打出 .prn，报文里就是 `@PJL SET MEDIASOURCE=MANUALFEED`，
+`PAPER=A4 PAPERWIDTH=4961 PAPERLENGTH=7016`，与本驱动下发的逐字一致。
+
+> 结论：旁路 token 已无悬念。若真机选旁路仍从纸盒 1 出纸，先确认旁路托盘里
+> 确实放了纸——设备的自动纸盒切换（Auto Tray Switching）在指定的进纸口
+> 检测不到纸时会改用其它纸盒，这一层驱动无法干预。
+
+### 8.2 BINDING 只有两个值，且设备不认
+`@PJL SET BINDING=LONGEDGE|SHORTEDGE` 设备全忽略（长短边都按短边装订），
+长边装订必须由主机把背面图像旋转 180°，见 §5。因此 PPD 里不再暴露
+`*TSBBinding` / `*TSBRotBack` 两个调试开关：BINDING 由 `*Duplex` 推导，
+旋转固定按"长边才转"执行。
+
+### 8.3 装完 deb 界面没变？
+`dpkg` 只更新 `/usr/share/cups/model/toshiba-estudio2323am.ppd`，而队列实际用的是
+`/etc/cups/ppd/<队列名>.ppd` 这份副本。0.1.7 起 `postinst` 会自动对带
+`TSB2323A` 标记的队列重新执行 `lpadmin -m`；老版本可手动跑一次：
+
+```bash
+sudo lpadmin -p <队列名> -m toshiba-estudio2323am.ppd
+```
