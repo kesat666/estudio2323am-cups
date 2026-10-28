@@ -63,6 +63,10 @@ struct tsb_ctx {
     size_t         page_cap;
     int            page_bpl;
     int            copy_index;
+
+    unsigned char *rot;          /* 背面 180° 旋转的临时缓冲 */
+    size_t         rot_cap;
+    int            page_seq;     /* 已产出页数：偶数=正面，奇数=背面 */
 };
 
 /* ------------------------------------------------------------------ 基础写出 */
@@ -164,6 +168,7 @@ void tsb_close(tsb_ctx *c)
     if (!c) return;
     free(c->scratch);
     free(c->page);
+    free(c->rot);
     free(c);
 }
 
@@ -282,6 +287,36 @@ static unsigned long count_dots(const unsigned char *p, size_t n)
     return bits;
 }
 
+/* ------------------------------------------------------- 背面 180° 旋转 */
+
+/* 1bpp 位图原地转 180°（行序倒置 + 每行位序倒置），宽度不必是 8 的倍数。 */
+static void rot180_1bpp(const unsigned char *src, unsigned char *dst,
+                        int w, int h, int bpl)
+{
+    int x, y;
+
+    memset(dst, 0, (size_t)bpl * (size_t)h);
+    for (y = 0; y < h; y++) {
+        const unsigned char *srow = src + (size_t)(h - 1 - y) * (size_t)bpl;
+        unsigned char       *drow = dst + (size_t)y * (size_t)bpl;
+
+        for (x = 0; x < w; x++) {
+            int sx = w - 1 - x;
+            if ((srow[sx >> 3] >> (7 - (sx & 7))) & 1)
+                drow[x >> 3] |= (unsigned char)(0x80 >> (x & 7));
+        }
+    }
+}
+
+/* 当前页是否需要旋转背面 */
+static int need_back_rotate(const tsb_ctx *c)
+{
+    if (!c->opt.duplex) return 0;
+    if (c->opt.back_rotate == 1) return 0;                      /* Off  */
+    if (c->opt.back_rotate == 2) return (c->page_seq & 1);      /* On   */
+    return (c->opt.duplex == 1) && (c->page_seq & 1);           /* Auto */
+}
+
 /* ---------------------------------------------------------------- 作业头 */
 
 int tsb_job_begin(tsb_ctx *c)
@@ -326,6 +361,10 @@ int tsb_page_begin(tsb_ctx *c, int width_px, int height_px, int copy_index)
     int bpl;
 
     if (!c || width_px <= 0 || height_px <= 0) return TSB_ERR;
+
+    /* 换了一份（copy）就把页序从头数：背面旋转靠奇偶判断，
+     * 页数为奇数时若不重置，第二份的正面会被当成背面转掉。 */
+    if (c->page_seq > 0 && copy_index != c->copy_index) c->page_seq = 0;
 
     c->cur_w      = width_px;
     c->cur_h      = height_px;
@@ -409,8 +448,31 @@ int tsb_page_end(tsb_ctx *c)
         const char *paper;
         time_t now;
         struct tm tmv;
+        unsigned char *img = c->page;   /* 实际送进 JBIG 的位图（可能是旋转后的） */
 
-        if (tsb_jbig_encode(c->page, c->cur_w, c->cur_h, c->page_bpl,
+        /* 背面旋转：本机机械翻转轴固定为短边，长边装订必须由主机把背面转 180°。
+         * 必须在编码与 DOTCOUNT 之前完成，两者都要用旋转后的像素。 */
+        if (need_back_rotate(c)) {
+            size_t need = (size_t)c->page_bpl * (size_t)c->cur_h;
+
+            if (need > c->rot_cap) {
+                unsigned char *np = (unsigned char *)realloc(c->rot, need);
+                if (!np) {
+                    fprintf(stderr, "ERROR: out of memory (rot %lu)\n",
+                            (unsigned long)need);
+                    return TSB_ERR;
+                }
+                c->rot = np;
+                c->rot_cap = need;
+            }
+            rot180_1bpp(c->page, c->rot, c->cur_w, c->cur_h, c->page_bpl);
+            img = c->rot;
+            fprintf(stderr, "DEBUG: back side rotated 180 (page_seq=%d)\n",
+                    c->page_seq);
+        }
+        c->page_seq++;
+
+        if (tsb_jbig_encode(img, c->cur_w, c->cur_h, c->page_bpl,
                             &bie, &bie_len) != 0) {
             fprintf(stderr,
                     "ERROR: JBIG encode failed (w=%d h=%d) — "
@@ -479,7 +541,7 @@ int tsb_page_end(tsb_ctx *c)
 
         /* ---- 页尾 ---- */
         if (wr_set_long(c, "DOTCOUNT",
-                        (long)count_dots(c->page,
+                        (long)count_dots(img,
                                          (size_t)c->page_bpl * (size_t)c->cur_h)) != TSB_OK)
             goto fail;
         if (wr_set(c, "PAGESTATUS", "END") != TSB_OK) goto fail;

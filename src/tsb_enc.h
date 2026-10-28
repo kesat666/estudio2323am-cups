@@ -57,6 +57,15 @@ typedef struct {
     int  x_dpi;
     int  y_dpi;
     int  copies;          /* 1 表示由 CUPS 复制, >1 表示本 filter 自己循环 */
+    /* 背面旋转：本机双面的机械翻转轴是固定的（短边），长边装订只能由主机
+     * 把背面图像旋转 180° 来"假装"——Windows 驱动也是这样做的（DLL 里的
+     * duplexBackRotate）。PJL 的 BINDING 字段设备根本不认，实测长/短边都出短边。
+     *   0 = Auto：双面长边时旋转背面（默认）
+     *   1 = Off ：不旋转（交给设备）
+     *   2 = On  ：双面时总是旋转背面
+     */
+    int  back_rotate;
+
     char username[32];    /* 写进 @PJL SET USERNAME=，来自 CUPS argv[2] */
     int  band_height;     /* 分带高度（行），0 表示不分带 */
     tsb_payload_mode mode;

@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   /* strcasecmp：解析 TSBRotBack 用 */
 
 #if defined(CUPS_VERSION_MAJOR) && CUPS_VERSION_MAJOR >= 3
 #error "本项目面向 CUPS 2.x；CUPS 3 需改用 PAPPL，见 README 第六节"
@@ -216,6 +217,22 @@ int main(int argc, char *argv[])
     opt_copy(opts, "TSBMediaSource", o.media_source,   sizeof o.media_source);
     opt_copy(opts, "TSBMT",          o.media_type_str, sizeof o.media_type_str);
     opt_copy(opts, "TSBBinding",     o.binding_override, sizeof o.binding_override);
+
+    /* 背面旋转：PJL 的 BINDING 本机不认（长短边都出短边），长边要靠主机把
+     * 背面图像转 180°。Auto=长边时旋转（默认），Off=不转，On=双面总转。 */
+    {
+        char v[24] = "";
+        opt_copy(opts, "TSBRotBack", v, sizeof v);
+        if (strcasecmp(v, "Off") == 0)       o.back_rotate = 1;
+        else if (strcasecmp(v, "On") == 0)   o.back_rotate = 2;
+        else                                 o.back_rotate = 0;
+        if (getenv("TSB_ROTBACK")) {
+            const char *e = getenv("TSB_ROTBACK");
+            if (strcasecmp(e, "off") == 0)      o.back_rotate = 1;
+            else if (strcasecmp(e, "on") == 0)  o.back_rotate = 2;
+            else                                o.back_rotate = 0;
+        }
+    }
     /* 兼容旧的环境变量写法：设了就覆盖选项 */
     {
         const char *e;
@@ -242,10 +259,10 @@ int main(int argc, char *argv[])
 
     /* 这几个值直接决定私有报文里的字段，抓包时必须能对上，所以打到 stderr */
     fprintf(stderr,
-            "DEBUG: opts duplex=%d slot=%d media_type=%d toner_save=%d media=\"%s\" "
-            "media_source=\"%s\" binding=\"%s\"\n",
-            o.duplex, o.input_slot, o.media_type, o.toner_save, o.media,
-            o.media_source, o.binding_override);
+            "DEBUG: opts duplex=%d slot=%d media_type=%d toner_save=%d rotback=%d "
+            "media=\"%s\" media_source=\"%s\" binding=\"%s\"\n",
+            o.duplex, o.input_slot, o.media_type, o.toner_save, o.back_rotate,
+            o.media, o.media_source, o.binding_override);
 
     {
         const char *m = getenv("TSB_MODE");

@@ -1,3 +1,16 @@
+toshiba-estudio2323am (0.1.5) unstable; urgency=low
+
+  * 双面长边修正：设备不认 @PJL SET BINDING（实测长边/短边都按短边装订）。
+    本机机械翻转轴固定为短边，长边装订改为由 filter 把背面（偶数页）图像
+    旋转 180° 实现——与 Windows 驱动 DLL 里的 duplexBackRotate 同思路。
+    新增 *TSBRotBack 选项（自动/关闭/总是旋转），便于 A/B 验证。
+    多份复印时按 copy 重置页序，避免奇数页时第二份的正面被误转。
+  * PPD 界面文案全部改为中文（UTF-8，LanguageVersion=Chinese），
+    选项键与下发的 @PJL 值保持 ASCII 不变。
+  * DOTCOUNT 改用旋转后的像素统计（原来统计的是旋转前的缓冲）。
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 12:20:00 +0800
+
 toshiba-estudio2323am (0.1.4) unstable; urgency=low
 
   * 修根因：PPD 的可打印区（ImageableArea）比整页小 18pt，导致 CUPS 把光栅缩小
