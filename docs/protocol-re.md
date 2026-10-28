@@ -161,6 +161,27 @@ ff            MY   = 255
 4. **`MEDIATYPE` 厚纸取值**、`PAPER` 的完整取值表。
 5. **`DOTCOUNT` 是否被校验**。若打印机拿它做校验，算错会拒页。
 
+## 10. 真正的根因：PAPER=CUSTOM（2026-10-28，v0.1.4）
+
+v0.1.3 把默认托盘改成 `TRAY1` 后，真机仍然**不管选哪个纸盒都从旁路出纸，双面也不对**。
+说明问题不在托盘 token，而在更上游：报文里的纸张尺寸是 `PAPER=CUSTOM`。
+
+**证据链**
+
+1. PPD 把可打印区写成 `ImageableArea A4: "18 18 577.28 823.89"`（比整页小 36pt）。
+   CUPS 按可打印区光栅化，A4 送出的是 **4661×6716**，而 Windows 驱动送的是整页
+   **4961×7016**。
+2. 编码器只按像素查表反推 `PAPER`，4661×6716 对不上任何标准纸 → `PAPER=CUSTOM`。
+3. 真机上"非标尺寸"意味着只能走手送（旁路），且该尺寸下双面被拒——两个异常同源。
+4. 把 `ImageableArea` 改成整页（`0 0 595.28 841.89`）后，同一份 PDF 的捕获立刻变成
+   `PAPER=A4` / `PAPERWIDTH=4961` / `PAPERLENGTH=7016`，与 Windows 样张逐字段一致。
+
+**结论**：GDI 机型由主机渲染整页，页边留白由打印机处理；PPD 里声明页边距只会让
+CUPS 缩小光栅，反而让打印机认不出纸型。`ImageableArea` 必须等于 `PageSize`。
+
+同时把 `PAPER` 的判定改成三级：media 关键字 → raster 头 `cupsPageSize`（点）→ 像素兜底，
+避免上游任何尺寸变化又把 token 打回 `CUSTOM`。
+
 ## 8. 上机结果（2026-10-28，v0.1.1）
 
 - 单面 A4 打印成功 → 报文被接受，JBIG 编码方向 OK（§5.1 关闭）。
@@ -211,6 +232,11 @@ python tools/port9100_proxy.py --target 192.168.1.50 --label white
 
 # 通用统计（熵 / 压缩率 / 差分）
 python tools/analyze_stream.py --stats captures/white.bin --page a4-600
+
+# 直接向打印机发 PJL 查询（libusb，ctypes，无需 pyusb）
+#   注意：2323AM 实测对 @PJL INFO/DINQUIRE 完全不应答（四个 IN 端点均超时），
+#   保留此工具是为了以后接其他 PJL 机型时能立刻取证。
+sudo python3 tools/pjlq.py "@PJL INFO ID" "@PJL INFO VARIABLES"
 ```
 
 ## 7. 上机验证清单

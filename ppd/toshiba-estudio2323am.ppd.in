@@ -57,10 +57,15 @@
 *CloseUI: *PageRegion
 
 *DefaultImageableArea: A4
-*ImageableArea A4/A4: "18 18 577.28 823.89"
-*ImageableArea A3/A3: "18 18 823.89 1172.55"
-*ImageableArea A5/A5: "18 18 401.53 577.28"
-*ImageableArea Letter/US Letter: "18 18 594 774"
+*%  可打印区 == 整页。这不是笔误：
+*%  该机型是主机渲染（GDI），Windows 驱动送出的光栅就是整页 A4（4961x7016 @600dpi），
+*%  页边留白由打印机自己处理。若在这里声明 18pt 边距，CUPS 会把光栅缩小一圈
+*%  （实测 4661x6716），报文里的 PAPER 只能落到 CUSTOM —— 真机表现为
+*%  "一律走手送（旁路）" 且 "双面被忽略"。所以必须与驱动保持一致，给满整页。
+*ImageableArea A4/A4: "0 0 595.28 841.89"
+*ImageableArea A3/A3: "0 0 841.89 1190.55"
+*ImageableArea A5/A5: "0 0 419.53 595.28"
+*ImageableArea Letter/US Letter: "0 0 612 792"
 
 *DefaultPaperDimension: A4
 *PaperDimension A4/A4: "595.28 841.89"

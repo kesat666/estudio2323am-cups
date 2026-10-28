@@ -289,6 +289,13 @@ int main(int argc, char *argv[])
         fprintf(stderr, "DEBUG: page %dx%d %ddpi bpp=%d\n",
                 width, height, (int)hdr.HWResolution[0], bpp);
 
+        /* 把 raster 头里的真实页面尺寸（点）交给编码器判定 @PJL SET PAPER。
+         * 不能只靠像素：PPD 的 ImageableArea 一旦小于 PageSize，像素尺寸就
+         * 对不上任何标准纸，PAPER 会退化成 CUSTOM，真机上表现为走旁路 + 双面失效。 */
+        tsb_hint_page_size(enc, hdr.cupsPageSize[0], hdr.cupsPageSize[1]);
+        fprintf(stderr, "DEBUG: page-size %.2fx%.2f pt\n",
+                hdr.cupsPageSize[0], hdr.cupsPageSize[1]);
+
         /* 整页缓冲：按最大需求一次分配，跨页复用 */
         need = (size_t)height * (size_t)bpl_out;
         if (need > page_cap) {

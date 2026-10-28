@@ -74,6 +74,15 @@ int tsb_job_end(tsb_ctx *c);
 
 /* 页级 */
 int tsb_page_begin(tsb_ctx *c, int width_px, int height_px, int copy_index);
+
+/* 页面尺寸提示（单位：点，1/72 英寸），来自 CUPS raster 头的 cupsPageSize。
+ *
+ * 为什么需要：PPD 的 ImageableArea 往往比 PageSize 小，CUPS 按可打印区光栅化，
+ * 于是像素尺寸永远比整页小一圈，用它反推 @PJL SET PAPER 只会得到 CUSTOM。
+ * 而 CUSTOM 在本机能触发两个可观测故障：一律走手送（旁路）、双面被拒。
+ * 所以 PAPER 的判定必须以真实页面尺寸为准，像素尺寸只作兜底。
+ */
+void tsb_hint_page_size(tsb_ctx *c, double width_pt, double height_pt);
 int tsb_page_band(tsb_ctx *c, const unsigned char *band, int y0, int nlines,
                   int bytes_per_line);
 int tsb_page_end(tsb_ctx *c);

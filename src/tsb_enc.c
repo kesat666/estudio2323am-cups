@@ -52,6 +52,10 @@ struct tsb_ctx {
     int         cur_h;
     int         rows_done;
 
+    /* 页面尺寸（点）。0 表示上游没给，退回用像素尺寸反推。 */
+    double      page_w_pt;
+    double      page_h_pt;
+
     unsigned char *scratch;      /* 旧模式（RAW/CAPTURE）用 */
     size_t         scratch_cap;
 
@@ -170,15 +174,67 @@ const tsb_stats *tsb_get_stats(const tsb_ctx *c)
 
 /* ------------------------------------------------------------ 纸张与统计 */
 
-/* 按像素尺寸反推 PJL 的 PAPER 取值；驱动用 A4 / A3 / LETTER 这种写法。 */
-static const char *paper_name(int w, int h)
+/* 由 CUPS media 关键字反推 PAPER 取值。关键字本身就编码了尺寸，比量像素可靠。 */
+static const char *paper_from_media(const char *media)
+{
+    static const struct { const char *pfx; const char *tok; } tab[] = {
+        { "iso_a4",       "A4"        },
+        { "iso_a3",       "A3"        },
+        { "iso_a5",       "A5"        },
+        { "iso_a6",       "A6"        },
+        { "jis_b5",       "B5"        },
+        { "iso_b5",       "B5"        },
+        { "na_letter",    "LETTER"    },
+        { "na_legal",     "LEGAL"     },
+        { "na_executive", "EXECUTIVE" },
+        { "na_statement", "STATEMENT" }
+    };
+    size_t i, n;
+
+    if (!media || !*media) return NULL;
+    for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+        n = strlen(tab[i].pfx);
+        if (strncmp(media, tab[i].pfx, n) == 0) return tab[i].tok;
+    }
+    return NULL;
+}
+
+/* 按页面尺寸（点）匹配；容差 3pt，够吸收 595.28 与 595 这种四舍五入。 */
+static const char *paper_from_pt(double w, double h)
+{
+    static const struct { double w, h; const char *n; } tab[] = {
+        { 595.28,  841.89, "A4"        },
+        { 841.89, 1190.55, "A3"        },
+        { 419.53,  595.28, "A5"        },
+        { 297.64,  419.53, "A6"        },
+        { 612.0,   792.0,  "LETTER"    },
+        { 612.0,  1008.0,  "LEGAL"     },
+        { 521.86,  756.0,  "EXECUTIVE" },
+        { 515.91,  728.5,  "B5"        },   /* JIS B5 182x257mm */
+        { 498.90,  708.66, "B5"        },   /* ISO B5 176x250mm */
+        { 396.0,   612.0,  "STATEMENT" }
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+        double dw = w - tab[i].w, dh = h - tab[i].h;
+        if (dw < 0) dw = -dw;
+        if (dh < 0) dh = -dh;
+        if (dw <= 3.0 && dh <= 3.0) return tab[i].n;
+    }
+    return NULL;
+}
+
+/* 兜底：按像素尺寸反推。仅在既没有 media 关键字、也没有页面尺寸提示时使用。 */
+static const char *paper_from_px(int w, int h)
 {
     static const struct { int w, h; const char *n; } tab[] = {
-        { 4961,  7016, "A4"     },
-        { 7016,  9921, "A3"     },
-        { 3508,  4961, "A5"     },
-        { 5100,  6600, "LETTER" },
-        { 3300,  4200, "STATEMENT" }
+        { 4961,  7016, "A4"        },
+        { 7016,  9921, "A3"        },
+        { 3508,  4961, "A5"        },
+        { 5100,  6600, "LETTER"    },
+        { 5100,  8400, "LEGAL"     },
+        { 3300,  5100, "STATEMENT" }
     };
     size_t i;
 
@@ -189,6 +245,28 @@ static const char *paper_name(int w, int h)
         if (dw <= 12 && dh <= 12) return tab[i].n;
     }
     return "CUSTOM";
+}
+
+void tsb_hint_page_size(tsb_ctx *c, double width_pt, double height_pt)
+{
+    if (!c) return;
+    if (width_pt > 1.0 && height_pt > 1.0) {
+        c->page_w_pt = width_pt;
+        c->page_h_pt = height_pt;
+    }
+}
+
+/* PAPER 取值：media 关键字 > 页面尺寸（点）> 像素尺寸 > CUSTOM */
+static const char *paper_token(const tsb_ctx *c)
+{
+    const char *t = paper_from_media(c->opt.media);
+
+    if (t) return t;
+    if (c->page_w_pt > 1.0 && c->page_h_pt > 1.0) {
+        t = paper_from_pt(c->page_w_pt, c->page_h_pt);
+        if (t) return t;
+    }
+    return paper_from_px(c->cur_w, c->cur_h);
 }
 
 static unsigned long count_dots(const unsigned char *p, size_t n)
@@ -353,7 +431,7 @@ int tsb_page_end(tsb_ctx *c)
 #endif
         strftime(ts, sizeof ts, "%Y/%m/%d %H:%M:%S", &tmv);
 
-        paper = paper_name(c->cur_w, c->cur_h);
+        paper = paper_token(c);
 
         if (wr_set(c, "TIMESTAMP",     ts)                                  != TSB_OK) goto fail;
         if (wr_set(c, "COMPRESS",      "JBIG")                              != TSB_OK) goto fail;
