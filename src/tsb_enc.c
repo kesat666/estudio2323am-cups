@@ -204,7 +204,9 @@ static const char *paper_from_media(const char *media)
     return NULL;
 }
 
-/* 按页面尺寸（点）匹配；容差 3pt，够吸收 595.28 与 595 这种四舍五入。 */
+/* 按页面尺寸（点）匹配；容差 3pt，够吸收 595.28 与 595 这种四舍五入。
+ * 横向打印时光栅是 841.89x595.28（宽高互换），所以两轮都试一遍——
+ * 否则横向文档又会退化成 PAPER=CUSTOM，重新触发走旁路/双面失效。 */
 static const char *paper_from_pt(double w, double h)
 {
     static const struct { double w, h; const char *n; } tab[] = {
@@ -220,12 +222,18 @@ static const char *paper_from_pt(double w, double h)
         { 396.0,   612.0,  "STATEMENT" }
     };
     size_t i;
+    int pass;
 
-    for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
-        double dw = w - tab[i].w, dh = h - tab[i].h;
-        if (dw < 0) dw = -dw;
-        if (dh < 0) dh = -dh;
-        if (dw <= 3.0 && dh <= 3.0) return tab[i].n;
+    for (pass = 0; pass < 2; pass++) {
+        double pw = pass ? h : w;
+        double ph = pass ? w : h;
+
+        for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+            double dw = pw - tab[i].w, dh = ph - tab[i].h;
+            if (dw < 0) dw = -dw;
+            if (dh < 0) dh = -dh;
+            if (dw <= 3.0 && dh <= 3.0) return tab[i].n;
+        }
     }
     return NULL;
 }
@@ -242,12 +250,18 @@ static const char *paper_from_px(int w, int h)
         { 3300,  5100, "STATEMENT" }
     };
     size_t i;
+    int pass;
 
-    for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
-        int dw = w - tab[i].w, dh = h - tab[i].h;
-        if (dw < 0) dw = -dw;
-        if (dh < 0) dh = -dh;
-        if (dw <= 12 && dh <= 12) return tab[i].n;
+    for (pass = 0; pass < 2; pass++) {
+        int pw = pass ? h : w;
+        int ph = pass ? w : h;
+
+        for (i = 0; i < sizeof tab / sizeof tab[0]; i++) {
+            int dw = pw - tab[i].w, dh = ph - tab[i].h;
+            if (dw < 0) dw = -dw;
+            if (dh < 0) dh = -dh;
+            if (dw <= 12 && dh <= 12) return tab[i].n;
+        }
     }
     return "CUSTOM";
 }
