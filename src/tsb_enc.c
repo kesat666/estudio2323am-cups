@@ -13,7 +13,7 @@
  *   @PJL SET SMOOTHING=ON|OFF\r\n
  *   @PJL SET TONERSAVE=ON|OFF\r\n
  *   @PJL SET DEPTCODENUM=""\r\n
- *   @PJL SET MEDIASOURCE=AUTO\r\n
+ *   @PJL SET MEDIASOURCE=TRAY1\r\n
  *   @PJL SET MEDIATYPE=PAPER\r\n
  *   @PJL SET PAGESTATUS=START\r\n
  *   @PJL SET COPIES=<n>\r\n
@@ -365,7 +365,7 @@ int tsb_page_end(tsb_ctx *c)
         if (wr_set(c, "TONERSAVE",     c->opt.toner_save ? "ON" : "OFF")    != TSB_OK) goto fail;
         if (wr_set(c, "DEPTCODENUM",   "\"\"")                              != TSB_OK) goto fail;
         {
-            const char *ms = c->opt.media_source[0] ? c->opt.media_source : "AUTO";
+            const char *ms = c->opt.media_source[0] ? c->opt.media_source : "TRAY1";
             const char *mt = c->opt.media_type_str[0] ? c->opt.media_type_str : "PAPER";
             if (wr_set(c, "MEDIASOURCE", ms) != TSB_OK) goto fail;
             if (wr_set(c, "MEDIATYPE",   mt) != TSB_OK) goto fail;

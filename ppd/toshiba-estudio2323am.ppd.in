@@ -87,16 +87,18 @@
 *Duplex DuplexTumble/Short-Edge Binding: ""
 *CloseUI: *Duplex
 *%
-*% 纸盒来源与装订方向：这两处当初只抓到单面 AUTO 样张，主纸盒 token 与 BINDING
-*% 真实取值都是上机才确认的。做成 PPD 选项，便于在真机上用 lp -o 直接试不同写法，
-*% 试出正确 token 后把默认值写死。注意选项"值"就是直接下发给 @PJL 的 token。
+*% 纸盒来源：0.1.3 起实测确认 纸盒1 = TRAY1、纸盒2 = TRAY2、旁路 = MANUALFEED、
+*% Auto = AUTO（源自驱动 eSSh6CFG.xml 的托盘表，并用 file:// 真实管线捕获 Windows
+*% 驱动输出 MEDIASOURCE=TRAY1 佐证）。默认 TRAY1，避免 AUTO 在本机落到旁路。
+*% 选项"值"就是直接下发给 @PJL 的 token。
 *%
 *OpenUI *TSBMediaSource/Media Source: PickOne
 *OrderDependency: 50 AnySetup *TSBMediaSource
-*DefaultTSBMediaSource: AUTO
+*DefaultTSBMediaSource: TRAY1
+*TSBMediaSource TRAY1/Cassette 1 (main tray): "TRAY1"
+*TSBMediaSource TRAY2/Cassette 2 (optional): "TRAY2"
+*TSBMediaSource MANUALFEED/Manual Feed (bypass): "MANUALFEED"
 *TSBMediaSource AUTO/Auto (printer picks): "AUTO"
-*TSBMediaSource CASSETTE/Cassette 1 (guess, confirm by capture): "CASSETTE"
-*TSBMediaSource MANUALFEED/Manual Feed (Bypass): "MANUALFEED"
 *CloseUI: *TSBMediaSource
 
 *OpenUI *TSBBinding/Binding (2-Sided): PickOne

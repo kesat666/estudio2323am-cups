@@ -1,3 +1,17 @@
+toshiba-estudio2323am (0.1.3) unstable; urgency=low
+
+  * 托盘真值固化：主纸盒 = MEDIASOURCE=TRAY1（默认）。0.1.2 的默认 AUTO 在本机
+    会被打印机解析成旁路托盘，表现为"出纸走旁路"。取值源自驱动 eSSh6CFG.xml 的
+    托盘表（Tray1/Tray2/ManualFeed/Auto），并用 file:// 真实管线捕获 Windows
+    驱动的输出 MEDIASOURCE=TRAY1 佐证。
+  * TSBMediaSource 选项从 CASSETTE(guess) 改为 TRAY1/TRAY2/MANUALFEED/AUTO，
+    默认 TRAY1。
+  * 双面：经驱动 DLL(eSSh6OCM.dll) 提取 PJL 模板确认，Windows 驱动发出的就是
+    @PJL SET DUPLEX=ON + BINDING=LONGEDGE|SHORTEDGE，与本驱动完全一致。故长/短
+    边 token 不动；若上机仍固定短边，再评估背面图像旋转方案。
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 11:30:00 +0800
+
 toshiba-estudio2323am (0.1.2) unstable; urgency=low
 
   * Make MEDIASOURCE / MEDIATYPE / BINDING runtime-selectable via PPD options
