@@ -150,12 +150,14 @@ ff            MY   = 255
    → **2026-10-28 上机确认：通过。** 单面 A4 能正常出纸，JBIG BIE 头被接受。
 2. **多页作业的 EOJ 位置**。当前实现是每页 `PAGESTATUS=END`、整个作业末尾一个
    `EOJ`。单页样本无法区分"每页 EOJ"与"作业末尾 EOJ"。
-3. **`BINDING` 是否真在双面时下发**。本机 `Set-PrintConfiguration -DuplexingMode`
-   没能改到 GDI 驱动的 DEVMODE（打出来的样本仍是 `DUPLEX=OFF`），这一条只有
-   在驱动对话框里手动勾双面再打印才能确认。
-   → **2026-10-28 上机观察：疑似被忽略。** 选长边/短边都打成短边装订，
-     表现像设备不认 `BINDING` 或我们的 token 不对。需抓真实双面样张确认
-     字段名与取值（见 §8）。
+3. **`BINDING` 的写法**。
+   → **2026-10-28 已从驱动 DLL 定案。** 从 `eSSh6OCM.dll` 提取到 Windows 驱动
+     实际 PJL 模板：`@PJL SET DUPLEX=ON` + `@PJL SET BINDING=LONGEDGE|SHORTEDGE`，
+     与本驱动发出的逐字相同，故 token 无误、无需再改。
+   → 仍未解释：本机双面长/短边都打成短边。v0.1.1 与 v0.1.2 的 BINDING 逻辑逐字
+     相同；设备若真忽略 BINDING，则 Windows 也应短边——因此更可能是"CUPS 选项
+     未传到 filter"或"驱动对长边做了背面图像旋转"。需在真机用显式
+     `-o Duplex=DuplexNoTumble` 打一页确认。
 4. **`MEDIATYPE` 厚纸取值**、`PAPER` 的完整取值表。
 5. **`DOTCOUNT` 是否被校验**。若打印机拿它做校验，算错会拒页。
 
@@ -172,6 +174,28 @@ ff            MY   = 255
   （`TSBMediaSource` / `TSBMT` / `TSBBinding`），默认值仍 AUTO / PAPER / 由 Duplex 推导，
   可在真机用 `lp -o TSBMediaSource=CASSETTE -o TSBBinding=LONGEDGE` 直接试不同 token，
   不必每次重编。正确 token 确认后写死成默认值。
+
+## 9. 托盘 token 定案（2026-10-28 远程联调）
+
+Windows 驱动配置文件 `eSSh6CFG.xml`（`C:\Windows\System32\spool\DRIVERS\x64\3`）
+里的 `MediaInputTrayCheck` 表：
+
+| 记录 | PJL token | 说明 |
+|---|---|---|
+| AutoSelectInputTray | `AUTO` | 打印机自选 |
+| ManualFeed | `MANUALFEED` | 旁路托盘/手送 |
+| Tray1 | `TRAY1` | 纸盒 1（主纸盒） |
+| Tray2 | `TRAY2` | 选配纸盒 2（本机未装） |
+
+用 `file://` 真实 CUPS 管线（临时 `FileDevice Yes` + 重启 cups）捕获 Windows 驱动
+对"纸盒 1"的输出，实测 `@PJL SET MEDIASOURCE=TRAY1`，与上表一致。
+
+**结论**：本机默认应发 `TRAY1`；`AUTO` 在本机会被解析成旁路托盘（即"出纸走旁路"
+现象）。v0.1.3 起默认 `TRAY1`。
+
+> 注：该 GDI 驱动的双面参数锁在 4892 字节的私有 DEVMODE 区，`Set-PrintConfiguration`
+> / WMI / 标准 `dmDuplex` 均改不到，无法用编程方式生成 Windows 双面样张；
+> 双面 token 只能靠上述 DLL 模板定案。
 
 ## 6. 工具
 
