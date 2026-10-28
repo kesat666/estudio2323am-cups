@@ -1,0 +1,12 @@
+# e-STUDIO 2323AM / 2823AM — 插入 USB 后纠正自动配错的 PPD
+#
+# 系统自带的 70-printers.rules 会调 udev-configure-printer 自动建队列，
+# 而它挑 PPD 只看 device-id 匹配，在装了 openprinting 包的机器上会挑中
+# "TOSHIBA e-ST280/282 Series PS"。本机是 GDI 机型，那个驱动不能用。
+#
+# 这里只做一件事：设备插入时起一个独立 unit 去检查并纠正（见脚本注释）。
+# 用 systemd-run 是为了脱离 udev 的 RUN 生命周期——udev 不允许长时间运行的进程。
+#
+# VID/PID 来自设备实测：Toshiba TEC 08a6:8056。
+
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="08a6", ATTRS{idProduct}=="8056", RUN+="/usr/bin/systemd-run --no-block --collect /usr/lib/toshiba-estudio2323am/tsb-udev-add.sh"

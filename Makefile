@@ -15,6 +15,11 @@
 PREFIX      ?= /usr
 FILTERDIR   ?= $(PREFIX)/lib/cups/filter
 PPDDIR      ?= $(PREFIX)/share/cups/model
+# udev 规则放在 /lib/udev/rules.d：Debian 系的约定位置（/lib 即 /usr/lib 的兼容入口），
+# 麒麟 V10 / UOS 20 都从这里读。
+UDEVDIR     ?= /lib/udev/rules.d
+# udev 规则里调用的辅助脚本（不能放 /usr/lib/udev，那里是系统自带的）
+LIBEXECDIR  ?= $(PREFIX)/lib/toshiba-estudio2323am
 DESTDIR     ?=
 
 CC          ?= cc
@@ -92,10 +97,17 @@ install: $(BIN)
 	install -d $(DESTDIR)$(PPDDIR)
 	install -m 644 ppd/toshiba-estudio2323am.ppd.in \
 		$(DESTDIR)$(PPDDIR)/toshiba-estudio2323am.ppd
+	install -d $(DESTDIR)$(LIBEXECDIR)
+	install -m 755 scripts/tsb-udev-add.sh $(DESTDIR)$(LIBEXECDIR)/tsb-udev-add.sh
+	install -d $(DESTDIR)$(UDEVDIR)
+	install -m 644 udev/71-toshiba-estudio2323am.rules \
+		$(DESTDIR)$(UDEVDIR)/71-toshiba-estudio2323am.rules
 
 uninstall:
 	rm -f $(DESTDIR)$(FILTERDIR)/$(BIN)
 	rm -f $(DESTDIR)$(PPDDIR)/toshiba-estudio2323am.ppd
+	rm -f $(DESTDIR)$(LIBEXECDIR)/tsb-udev-add.sh
+	rm -f $(DESTDIR)$(UDEVDIR)/71-toshiba-estudio2323am.rules
 
 deb:
 	dpkg-buildpackage -us -uc -b

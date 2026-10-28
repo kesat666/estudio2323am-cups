@@ -1,28 +1,69 @@
 #!/bin/sh
-# debian/postinst — 安装/升级后把新 PPD 应用到已存在的队列
+# debian/postinst — 安装/升级后把队列的 PPD 纠正成本驱动
 #
-# 为什么需要这一步：
-#   dpkg 只会把 PPD 装到 /usr/share/cups/model/，而每个打印队列实际使用的是
-#   /etc/cups/ppd/<队列名>.ppd 这份副本（创建队列时由 lpadmin 拷贝生成）。
-#   不重新应用的话，用户升级后界面里仍是旧选项——比如 0.1.6 已经删掉的
-#   TSBBinding / TSBRotBack 还会留在下拉框里，看起来像"升级没生效"。
+# 两件事：
 #
-# 队列列表直接扫 /etc/cups/ppd/，不去解析 lpstat -v 的文本：那行是
-# "device for <队列>: <uri>"，队列名和 uri 里都可能带冒号，正则很容易截错。
-# 只处理 PPD 里带 TSB2323A 标记（本驱动的 PCFileName）的队列，别的打印机不碰；
-# device-uri、队列名、共享设置都由 lpadmin 原样保留。
+#   1) 刷新。dpkg 只把 PPD 装到 /usr/share/cups/model/，而每个队列实际用的是
+#      /etc/cups/ppd/<队列名>.ppd 这份副本（创建队列时 lpadmin 拷的）。不重新
+#      应用的话，升级后界面里仍是旧选项。
+#
+#   2) 纠正。系统在 USB 热插拔时会自动建队列（udev-configure-printer），它按
+#      device-id 在自己能找到的 PPD 里挑一个。openprinting 包里有个
+#      "TOSHIBA e-ST280/282 Series PS"，在 e-STUDIO 系列上经常被挑中——可本机
+#      是 GDI 机型，根本没有 PostScript 解释器，用它打出来就是一堆乱码或不响应。
+#      这里把所有「指向本机型的 USB 设备、PPD 却不是本驱动」的队列一并换成
+#      toshiba-estudio2323am.ppd，省得用户自己去删队列重建。
+#
+# 只碰 device-uri 里带 2323AM/2823AM 的队列；网络队列、其它型号一律不碰。
 set -e
+
+MODEL_PPD=toshiba-estudio2323am.ppd
+MODEL_FILE=/usr/share/cups/model/toshiba-estudio2323am.ppd
+MARK=TSB2323A
+
+apply_ppd() {
+    # 用 -P 直接给文件，不用 -m 给驱动名。
+    # 原因：一个队列在短时间内被换过 PPD 之后，cupsd 的 printer->ppd_name 会和
+    # 磁盘上的 PPD 脱节——-m 设的就是 ppd-name，cupsd 认为"名字没变"就跳过，
+    # 可文件其实已经被上一条 lpadmin 换掉了，表现是 -m 返回 0 却毫无效果。
+    # -P 走"直接装这个 PPD 文件"，不经过名字比对，实测稳定。
+    q=$1
+    ok=0
+    if [ -f "$MODEL_FILE" ]; then
+        lpadmin -p "$q" -P "$MODEL_FILE" >/dev/null 2>&1 || ok=1
+    else
+        lpadmin -p "$q" -m "$MODEL_PPD" >/dev/null 2>&1 || ok=1
+    fi
+    if [ "$ok" -ne 0 ]; then
+        echo "提示: 未能自动设置队列 $q 的驱动，可手动执行：" >&2
+        echo "      lpadmin -p $q -P $MODEL_FILE" >&2
+    fi
+}
 
 if command -v lpadmin >/dev/null 2>&1 && LC_ALL=C lpstat -r >/dev/null 2>&1; then
     for f in /etc/cups/ppd/*.ppd; do
         [ -f "$f" ] || continue
-        grep -q 'TSB2323A' "$f" 2>/dev/null || continue
         p=$(basename "$f" .ppd)
-        if ! lpadmin -p "$p" -m toshiba-estudio2323am.ppd >/dev/null 2>&1; then
-            echo "提示: 未能自动刷新队列 $p 的 PPD，可手动执行：" >&2
-            echo "      lpadmin -p $p -m toshiba-estudio2323am.ppd" >&2
+
+        # 队列指向哪里（队列名不含冒号，所以 [^:]* 截到第一个冒号就停）
+        uri=$(LC_ALL=C lpstat -v "$p" 2>/dev/null | sed -n 's/^device for [^:]*: //p')
+        case "$uri" in
+            *2323AM*|*2823AM*) ;;
+            *) continue ;;
+        esac
+
+        if grep -q "$MARK" "$f" 2>/dev/null; then
+            apply_ppd "$p"                      # 已经是本驱动：刷新到最新 PPD
+        else
+            echo "队列 $p 指向本机型，但用的是别的驱动（$(grep -m1 '^\*NickName' "$f" 2>/dev/null | cut -d'"' -f2)），改用 $MODEL_PPD"
+            apply_ppd "$p"
         fi
     done
+fi
+
+# 新装的 udev 规则要重载才会生效，否则得等重启
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules >/dev/null 2>&1 || true
 fi
 
 #DEBHELPER#

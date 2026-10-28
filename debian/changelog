@@ -1,3 +1,20 @@
+toshiba-estudio2323am (0.1.8) unstable; urgency=low
+
+  * 修「系统自动配成 PS 驱动」。插 USB 时 udev-configure-printer 会按
+    IEEE-1284 device-id 自动建队列，它挑 PPD 只看匹配、不看机型能力；
+    装了 openprinting 包的机器（统信 UOS 20 默认就装）上有
+    "TOSHIBA e-ST280/282 Series PS"，在 e-STUDIO 系列上经常被挑中。
+    本机是 GDI 机型，没有 PostScript 解释器，用那个驱动只会打乱码。
+  * 新增 udev 规则 71-toshiba-estudio2323am.rules + 辅助脚本
+    tsb-udev-add.sh：设备插入（VID:PID = 08a6:8056）后起一个独立 unit，
+    等系统建出队列，若其 device-uri 指向本机型而 PPD 不是本驱动就换成
+    toshiba-estudio2323am.ppd。已经是本驱动的队列不动，不会重置用户设置。
+  * postinst 增加同样的纠正逻辑：装包/升级时把已经存在的错配队列一并改过来
+    （覆盖「先插打印机、后装驱动」的情况），并 udevadm control --reload-rules。
+  * Makefile install 增加 $(LIBEXECDIR) 与 $(UDEVDIR) 两处安装，uninstall 对应清理。
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 16:05:00 +0800
+
 toshiba-estudio2323am (0.1.7) unstable; urgency=low
 
   * 修 0.1.6 的 postinst：原来用 sed 从 "device for <队列>: <uri>" 里截队列名，

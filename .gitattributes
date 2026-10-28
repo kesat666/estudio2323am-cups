@@ -8,8 +8,11 @@
 *.md       text eol=lf
 *.yml      text eol=lf
 *.ppd.in   text eol=lf
+*.sh       text eol=lf
+*.rules    text eol=lf
 Makefile       text eol=lf
 debian/rules   text eol=lf
+debian/postinst text eol=lf
 Dockerfile     text eol=lf
 .gitignore     text eol=lf
 .gitattributes text eol=lf
