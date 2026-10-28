@@ -1,3 +1,12 @@
+toshiba-estudio2323am (0.1.7) unstable; urgency=low
+
+  * 修 0.1.6 的 postinst：原来用 sed 从 "device for <队列>: <uri>" 里截队列名，
+    正则贪婪匹配会连 uri 的 "usb:" 一起吞掉，得到 "队列:" 这种不存在的名字，
+    于是升级后 PPD 没有被刷新。改为直接扫 /etc/cups/ppd/*.ppd，文件名即队列名；
+    lpadmin 失败时给出可手动执行的提示，不再静默忽略。
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 15:20:00 +0800
+
 toshiba-estudio2323am (0.1.6) unstable; urgency=low
 
   * 界面精简（双面只留一个选项）。0.1.5 为了 A/B 验证同时暴露了三个双面

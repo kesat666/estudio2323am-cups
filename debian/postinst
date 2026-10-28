@@ -7,16 +7,20 @@
 #   不重新应用的话，用户升级后界面里仍是旧选项——比如 0.1.6 已经删掉的
 #   TSBBinding / TSBRotBack 还会留在下拉框里，看起来像"升级没生效"。
 #
-# 只处理 PPD 里带 TSB2323A 标记（即本驱动的 PCFileName）的队列，
-# 其它打印机一律不碰；device-uri、队列名、共享设置都由 lpadmin 原样保留。
+# 队列列表直接扫 /etc/cups/ppd/，不去解析 lpstat -v 的文本：那行是
+# "device for <队列>: <uri>"，队列名和 uri 里都可能带冒号，正则很容易截错。
+# 只处理 PPD 里带 TSB2323A 标记（本驱动的 PCFileName）的队列，别的打印机不碰；
+# device-uri、队列名、共享设置都由 lpadmin 原样保留。
 set -e
 
-if command -v lpstat >/dev/null 2>&1 && LC_ALL=C lpstat -r >/dev/null 2>&1; then
-    for p in $(LC_ALL=C lpstat -v 2>/dev/null | sed -n 's/^device for \(.*\):.*$/\1/p'); do
-        f="/etc/cups/ppd/$p.ppd"
+if command -v lpadmin >/dev/null 2>&1 && LC_ALL=C lpstat -r >/dev/null 2>&1; then
+    for f in /etc/cups/ppd/*.ppd; do
         [ -f "$f" ] || continue
-        if grep -q 'TSB2323A' "$f" 2>/dev/null; then
-            lpadmin -p "$p" -m toshiba-estudio2323am.ppd >/dev/null 2>&1 || true
+        grep -q 'TSB2323A' "$f" 2>/dev/null || continue
+        p=$(basename "$f" .ppd)
+        if ! lpadmin -p "$p" -m toshiba-estudio2323am.ppd >/dev/null 2>&1; then
+            echo "提示: 未能自动刷新队列 $p 的 PPD，可手动执行：" >&2
+            echo "      lpadmin -p $p -m toshiba-estudio2323am.ppd" >&2
         fi
     done
 fi

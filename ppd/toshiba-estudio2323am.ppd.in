@@ -18,7 +18,7 @@
 *%  键是 CUPS 选项名，值是要原样下发的 @PJL token，都不能翻译。
 *% ==========================================================================
 *FormatVersion: "4.3"
-*FileVersion: "0.1.6"
+*FileVersion: "0.1.7"
 *LanguageVersion: Chinese
 *LanguageEncoding: UTF-8
 *PCFileName: "TSB2323A.PPD"
