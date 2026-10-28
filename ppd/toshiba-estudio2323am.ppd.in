@@ -87,11 +87,26 @@
 *Duplex DuplexTumble/Short-Edge Binding: ""
 *CloseUI: *Duplex
 *%
-*% 刻意不提供纸盒选择（InputSlot）与介质类型（MediaType）：
-*%   - 本机只有标配 250 张纸盒 + 100 张手送，没有加装 MY-1043-B 第二纸盒；
-*%   - 这两类字段在私有报文里的位置尚未确认，暴露选项只会扩大逆向面。
-*% 逆向需要强制指定时，用环境变量 TSB_SLOT / TSB_MEDIATYPE（见 src/cups_filter.c），
-*% 不经过 PPD，不影响用户侧界面。协议确认后再决定是否加回 PPD。
+*% 纸盒来源与装订方向：这两处当初只抓到单面 AUTO 样张，主纸盒 token 与 BINDING
+*% 真实取值都是上机才确认的。做成 PPD 选项，便于在真机上用 lp -o 直接试不同写法，
+*% 试出正确 token 后把默认值写死。注意选项"值"就是直接下发给 @PJL 的 token。
+*%
+*OpenUI *TSBMediaSource/Media Source: PickOne
+*OrderDependency: 50 AnySetup *TSBMediaSource
+*DefaultTSBMediaSource: AUTO
+*TSBMediaSource AUTO/Auto (printer picks): "AUTO"
+*TSBMediaSource CASSETTE/Cassette 1 (guess, confirm by capture): "CASSETTE"
+*TSBMediaSource MANUALFEED/Manual Feed (Bypass): "MANUALFEED"
+*CloseUI: *TSBMediaSource
+
+*OpenUI *TSBBinding/Binding (2-Sided): PickOne
+*OrderDependency: 50 AnySetup *TSBBinding
+*DefaultTSBBinding: Auto
+*TSBBinding Auto/Auto (follow Duplex): ""
+*TSBBinding LONGEDGE/Long-Edge: "LONGEDGE"
+*TSBBinding SHORTEDGE/Short-Edge: "SHORTEDGE"
+*TSBBinding NONE/Suppress BINDING field: "NONE"
+*CloseUI: *TSBBinding
 *%
 
 

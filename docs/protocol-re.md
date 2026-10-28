@@ -147,13 +147,31 @@ ff            MY   = 255
 
 1. **打印机是否接受 jbigkit 产出的 BIE 头**。解码方向已通过，编码方向只能上机看。
    若出花屏或拒收，先把 `order` 改成 `JBG_SEQ`，或去掉 `my=255` 试单条带。
+   → **2026-10-28 上机确认：通过。** 单面 A4 能正常出纸，JBIG BIE 头被接受。
 2. **多页作业的 EOJ 位置**。当前实现是每页 `PAGESTATUS=END`、整个作业末尾一个
    `EOJ`。单页样本无法区分"每页 EOJ"与"作业末尾 EOJ"。
 3. **`BINDING` 是否真在双面时下发**。本机 `Set-PrintConfiguration -DuplexingMode`
    没能改到 GDI 驱动的 DEVMODE（打出来的样本仍是 `DUPLEX=OFF`），这一条只有
    在驱动对话框里手动勾双面再打印才能确认。
+   → **2026-10-28 上机观察：疑似被忽略。** 选长边/短边都打成短边装订，
+     表现像设备不认 `BINDING` 或我们的 token 不对。需抓真实双面样张确认
+     字段名与取值（见 §8）。
 4. **`MEDIATYPE` 厚纸取值**、`PAPER` 的完整取值表。
 5. **`DOTCOUNT` 是否被校验**。若打印机拿它做校验，算错会拒页。
+
+## 8. 上机结果（2026-10-28，v0.1.1）
+
+- 单面 A4 打印成功 → 报文被接受，JBIG 编码方向 OK（§5.1 关闭）。
+- **异常 1：出纸走旁路（手送）而非主纸盒。** 报文写死 `MEDIASOURCE=AUTO`，
+  在真机上 AUTO 让打印机自选、且当前默认到旁路。主纸盒的真实 token 单面样张没抓到
+  （参考 `white.prn` 也是 AUTO），需抓"驱动明确选主纸盒"的样张定 token。
+- **异常 2：双面长边/短边都打成短边。** `BINDING=LONGEDGE|SHORTEDGE` 是看驱动 DLL
+  字符串猜的映射，未抓过真实双面样张；设备表现像忽略该字段。需抓长边、短边两份
+  双面样张，逐字段对比确认 `DUPLEX`/`BINDING` 的真实写法。
+- 应对：v0.1.2 起 `MEDIASOURCE`、`MEDIATYPE`、`BINDING` 改为 PPD 可选项
+  （`TSBMediaSource` / `TSBMT` / `TSBBinding`），默认值仍 AUTO / PAPER / 由 Duplex 推导，
+  可在真机用 `lp -o TSBMediaSource=CASSETTE -o TSBBinding=LONGEDGE` 直接试不同 token，
+  不必每次重编。正确 token 确认后写死成默认值。
 
 ## 6. 工具
 

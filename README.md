@@ -198,12 +198,12 @@ GH_TOKEN=ghp_xxx ./tools/publish.sh --token   # HTTPS+PAT，自动建仓并推�
 
 ```bash
 # 麒麟 V10 SP1 (arm64)
-curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.1/toshiba-estudio2323am_0.1.1_arm64.deb
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.2/toshiba-estudio2323am_0.1.2_arm64.deb
 
 # 统信 UOS 20 (amd64)
-curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.1/toshiba-estudio2323am_0.1.1_amd64.deb
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.2/toshiba-estudio2323am_0.1.2_amd64.deb
 
-curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.1/SHA256SUMS
+curl -LO https://github.com/kesat666/estudio2323am-cups/releases/download/v0.1.2/SHA256SUMS
 sha256sum -c SHA256SUMS
 ```
 

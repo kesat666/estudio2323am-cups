@@ -113,6 +113,13 @@ static int parse_media_type(const char *opts)
     return 0;
 }
 
+/* 把 argv[5] 里某个选项的"原值"拷出来（用于直接透传 PJL token，不翻译） */
+static void opt_copy(const char *opts, const char *key, char *out, size_t cap)
+{
+    if (opt_get(opts, key, out, cap)) return;
+    out[0] = '\0';
+}
+
 /* --------------------------------------------------- 8bpp 灰度 → 1bpp */
 
 static void gray8_to_bw(const unsigned char *src, unsigned char *dst,
@@ -202,6 +209,25 @@ int main(int argc, char *argv[])
     o.media_type  = parse_media_type(opts);
     o.toner_save  = opt_is(opts, "TonerSave", "True") ? 1 : 0;
     o.band_height = BAND_LINES;
+
+    /* 把可选覆盖字段从 CUPS 选项里原样取出（没有就留空，编码器走默认）。
+     * 这三个字段的真实取值当初缺样张，做成可选项便于真机用 lp -o 试不同写法，
+     * 试出正确 token 后再写死成默认值。 */
+    opt_copy(opts, "TSBMediaSource", o.media_source,   sizeof o.media_source);
+    opt_copy(opts, "TSBMT",          o.media_type_str, sizeof o.media_type_str);
+    opt_copy(opts, "TSBBinding",     o.binding_override, sizeof o.binding_override);
+    /* 兼容旧的环境变量写法：设了就覆盖选项 */
+    {
+        const char *e;
+        if ((e = getenv("TSB_SLOT"))    && *e) snprintf(o.media_source,    sizeof o.media_source,    "%s", e);
+        if ((e = getenv("TSB_MEDIATYPE")) && *e) {
+            /* 旧版映射厚纸等；新写法直接透传 token，这里仅当值是英文 token 时透传 */
+            if (strcmp(e, "thick") == 0)    snprintf(o.media_type_str, sizeof o.media_type_str, "THICK");
+            else if (strcmp(e, "thin") == 0) snprintf(o.media_type_str, sizeof o.media_type_str, "THIN");
+            else if (strcmp(e, "recycled") == 0) snprintf(o.media_type_str, sizeof o.media_type_str, "RECYCLED");
+            else snprintf(o.media_type_str, sizeof o.media_type_str, "%s", e);
+        }
+    }
     /* 报文结构已确认（PJL + JBIG），默认走真实输出。
      * 调试时用 TSB_MODE=raw|capture 切回比对模式。 */
     o.mode        = TSB_PAYLOAD_PJL_JBIG;
@@ -216,8 +242,10 @@ int main(int argc, char *argv[])
 
     /* 这几个值直接决定私有报文里的字段，抓包时必须能对上，所以打到 stderr */
     fprintf(stderr,
-            "DEBUG: opts duplex=%d slot=%d media_type=%d toner_save=%d media=\"%s\"\n",
-            o.duplex, o.input_slot, o.media_type, o.toner_save, o.media);
+            "DEBUG: opts duplex=%d slot=%d media_type=%d toner_save=%d media=\"%s\" "
+            "media_source=\"%s\" binding=\"%s\"\n",
+            o.duplex, o.input_slot, o.media_type, o.toner_save, o.media,
+            o.media_source, o.binding_override);
 
     {
         const char *m = getenv("TSB_MODE");

@@ -39,6 +39,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 struct tsb_ctx {
@@ -363,17 +364,29 @@ int tsb_page_end(tsb_ctx *c)
         if (wr_set(c, "SMOOTHING",     "OFF")                               != TSB_OK) goto fail;
         if (wr_set(c, "TONERSAVE",     c->opt.toner_save ? "ON" : "OFF")    != TSB_OK) goto fail;
         if (wr_set(c, "DEPTCODENUM",   "\"\"")                              != TSB_OK) goto fail;
-        if (wr_set(c, "MEDIASOURCE",   "AUTO")                              != TSB_OK) goto fail;
-        if (wr_set(c, "MEDIATYPE",     "PAPER")                             != TSB_OK) goto fail;
+        {
+            const char *ms = c->opt.media_source[0] ? c->opt.media_source : "AUTO";
+            const char *mt = c->opt.media_type_str[0] ? c->opt.media_type_str : "PAPER";
+            if (wr_set(c, "MEDIASOURCE", ms) != TSB_OK) goto fail;
+            if (wr_set(c, "MEDIATYPE",   mt) != TSB_OK) goto fail;
+        }
         if (wr_set(c, "PAGESTATUS",    "START")                             != TSB_OK) goto fail;
         if (wr_set_long(c, "COPIES",   (long)(c->opt.copies > 0 ? c->opt.copies : 1)) != TSB_OK) goto fail;
 
-        /* 双面：DUPLEX 只有 ON/OFF，装订方向是独立字段 BINDING */
+        /* 双面：DUPLEX 只有 ON/OFF，装订方向是独立字段 BINDING。
+         * BINDING 的取值（长短边 token）当初只能从驱动 DLL 字符串猜，未抓过真实
+         * 双面样张，故做成可被 TSBBinding 选项覆盖，便于真机试不同写法。 */
         if (wr_set(c, "DUPLEX", c->opt.duplex ? "ON" : "OFF") != TSB_OK) goto fail;
         if (c->opt.duplex) {
-            if (wr_set(c, "BINDING",
-                       c->opt.duplex == 2 ? "SHORTEDGE" : "LONGEDGE") != TSB_OK)
-                goto fail;
+            const char *bv;
+            if (c->opt.binding_override[0] == '\0') {
+                bv = (c->opt.duplex == 2) ? "SHORTEDGE" : "LONGEDGE";
+            } else if (strcasecmp(c->opt.binding_override, "NONE") == 0) {
+                bv = NULL;          /* 明确不发射 BINDING 字段 */
+            } else {
+                bv = c->opt.binding_override;
+            }
+            if (bv && wr_set(c, "BINDING", bv) != TSB_OK) goto fail;
         }
 
         if (wr_set(c, "PAPER",         paper)                               != TSB_OK) goto fail;

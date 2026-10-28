@@ -38,8 +38,19 @@ typedef enum {
 typedef struct {
     int  duplex;          /* 0 单面, 1 双面长边, 2 双面短边（需选配 MD-0107） */
     int  toner_save;      /* 省墨 */
-    int  input_slot;      /* 0 自动, 1 纸盒1, 2 纸盒2(本机未装), 3 手送 */
+    int  input_slot;      /* 0 自动, 1 纸盒1, 2 纸盒2(本机未装), 3 手送（保留，未直接下发给报文） */
     int  media_type;      /* 0 普通纸, 1 厚纸, 2 薄纸, 3 再生纸 */
+    /* 原样下发给 @PJL 的字段值（留空则走默认）：
+     *   media_source    → MEDIASOURCE（默认 "AUTO"；主纸盒 token 需抓 Windows 样张确认）
+     *   media_type_str  → MEDIATYPE（默认 "PAPER"）
+     *   binding_override→ BINDING：非空时直接用该值；"NONE" 表示不发射该字段；
+     *                     空时由 duplex 推导（1→LONGEDGE, 2→SHORTEDGE）
+     * 当初单面样张只见到 AUTO，主纸盒 token 与 BINDING 真实取值都是上机才确认的，
+     * 所以做成可选，便于在真机上用 lp -o 快速试不同 token 而不必重编。
+     */
+    char media_source[48];
+    char media_type_str[48];
+    char binding_override[24];
     char media[40];       /* CUPS media 关键字（如 iso_a4_210x297mm），原样带进报文便于比对 */
     int  media_width_px;  /* 纸张宽度（像素，按 x_dpi 计） */
     int  media_height_px;

@@ -1,3 +1,20 @@
+toshiba-estudio2323am (0.1.2) unstable; urgency=low
+
+  * Make MEDIASOURCE / MEDIATYPE / BINDING runtime-selectable via PPD options
+    (TSBMediaSource / TSBMT / TSBBinding) so the exact PJL tokens can be
+    tried on real hardware with `lp -o` instead of rebuilding each time.
+  * Wire the encoder to actually emit MEDIASOURCE/MEDIATYPE from job options
+    (previously hardcoded to AUTO/PAPER, ignoring the TSB_SLOT/TSB_MEDIATYPE
+    environment knobs entirely).
+  * Defaults unchanged (AUTO / PAPER / derived from Duplex) so existing installs
+    keep behaving as before until the correct tokens are confirmed by capture.
+  * Background: first on-hardware print succeeded (JBIG BIE accepted), but the
+    device fed from the bypass tray on MEDIASOURCE=AUTO and ignored BINDING.
+    Both tokens need a real Windows capture to pin down (see docs/protocol-re.md
+    section 8).
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 09:30:00 +0800
+
 toshiba-estudio2323am (0.1.1) unstable; urgency=low
 
   * Fix the PPD banner comment, which still claimed the driver could not
