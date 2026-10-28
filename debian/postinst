@@ -1,0 +1,26 @@
+#!/bin/sh
+# debian/postinst — 安装/升级后把新 PPD 应用到已存在的队列
+#
+# 为什么需要这一步：
+#   dpkg 只会把 PPD 装到 /usr/share/cups/model/，而每个打印队列实际使用的是
+#   /etc/cups/ppd/<队列名>.ppd 这份副本（创建队列时由 lpadmin 拷贝生成）。
+#   不重新应用的话，用户升级后界面里仍是旧选项——比如 0.1.6 已经删掉的
+#   TSBBinding / TSBRotBack 还会留在下拉框里，看起来像"升级没生效"。
+#
+# 只处理 PPD 里带 TSB2323A 标记（即本驱动的 PCFileName）的队列，
+# 其它打印机一律不碰；device-uri、队列名、共享设置都由 lpadmin 原样保留。
+set -e
+
+if command -v lpstat >/dev/null 2>&1 && LC_ALL=C lpstat -r >/dev/null 2>&1; then
+    for p in $(LC_ALL=C lpstat -v 2>/dev/null | sed -n 's/^device for \(.*\):.*$/\1/p'); do
+        f="/etc/cups/ppd/$p.ppd"
+        [ -f "$f" ] || continue
+        if grep -q 'TSB2323A' "$f" 2>/dev/null; then
+            lpadmin -p "$p" -m toshiba-estudio2323am.ppd >/dev/null 2>&1 || true
+        fi
+    done
+fi
+
+#DEBHELPER#
+
+exit 0

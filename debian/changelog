@@ -1,3 +1,20 @@
+toshiba-estudio2323am (0.1.6) unstable; urgency=low
+
+  * 界面精简（双面只留一个选项）。0.1.5 为了 A/B 验证同时暴露了三个双面
+    相关下拉项（*Duplex / *TSBBinding / *TSBRotBack），现已确认结论，
+    删除后两个：BINDING 由 filter 按长边/短边自动推导，背面旋转固定按
+    "长边时旋转"执行，用户只需要选单面 / 长边 / 短边。
+  * 界面精简（纸张来源只留实际装了的进纸口）：删除 AUTO 与 纸盒 2，
+    只保留 纸盒 1 / 旁路托盘。默认 纸盒 1。
+  * 新增 debian/postinst：升级时对使用本驱动的队列重新应用一次 model PPD。
+    此前 dpkg 只更新 /usr/share/cups/model/，而队列实际用的是
+    /etc/cups/ppd/<队列>.ppd 副本，导致升级后界面里仍显示已删除的旧选项。
+  * 复核纸盒 token：从 Windows 驱动 eSSh6OCM.dll 中确认
+    "@PJL SET MEDIASOURCE=MANUALFEED" 是旁路的硬编码串，并用文件端口捕获
+    Windows 驱动选"旁路托盘"（DMBIN 258）的报文，与本驱动逐字一致。
+
+ -- kesat666 <keast606@gmail.com>  Wed, 28 Oct 2026 15:05:00 +0800
+
 toshiba-estudio2323am (0.1.5) unstable; urgency=low
 
   * 双面长边修正：设备不认 @PJL SET BINDING（实测长边/短边都按短边装订）。
